@@ -1,0 +1,2459 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Bengaluru AQI Navigator</title>
+
+<link rel="stylesheet"
+      href="{{ url_for('static', filename='css/style.css') }}">
+
+<link rel="stylesheet"
+      href="https://unpkg.com/leaflet/dist/leaflet.css">
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+
+
+<style>
+
+
+@media (max-width:800px) {
+
+
+html,
+body {
+
+    width:100%;
+    height:100%;
+    margin:0;
+    padding:0;
+    overflow:hidden;
+
+}
+
+
+#map {
+
+    position:fixed !important;
+
+    top:0 !important;
+    left:0 !important;
+    right:0 !important;
+    bottom:0 !important;
+
+    width:100% !important;
+    height:100% !important;
+
+    z-index:1 !important;
+
+}
+
+
+#sidebar {
+
+    position:fixed !important;
+
+    top:0 !important;
+    left:0 !important;
+    bottom:0 !important;
+
+    width:min(88vw,370px) !important;
+    max-width:370px !important;
+
+    height:100dvh !important;
+
+    display:flex !important;
+
+    flex-direction:column !important;
+
+    overflow:hidden !important;
+
+    transform:translate3d(-110%,0,0) !important;
+
+    transition:transform .28s ease !important;
+
+    z-index:5000 !important;
+
+    isolation:isolate !important;
+
+    background:transparent !important;
+
+    box-shadow:
+        10px 0 35px
+        rgba(0,0,0,.25) !important;
+
+}
+
+
+#sidebar.mobile-hidden {
+
+    transform:translate3d(-110%,0,0) !important;
+
+}
+
+
+#sidebar.mobile-open {
+
+    transform:translate3d(0,0,0) !important;
+
+}
+
+
+/* =================================================
+   KARNATAKA BACKGROUND
+   ================================================= */
+
+#sidebar::before {
+
+    content:"";
+
+    position:absolute;
+
+    inset:0;
+
+    z-index:-3;
+
+    pointer-events:none;
+
+    background:
+        url("/static/images/karnataka_glass_background.png")
+        center center / cover
+        no-repeat;
+
+}
+
+
+#sidebar::after {
+
+    content:none !important;
+
+}
+
+
+/* =================================================
+   HEADER
+   ================================================= */
+
+#topBar {
+
+    position:relative;
+
+    width:100%;
+
+    height:60px;
+
+    min-height:60px;
+
+    flex:0 0 60px;
+
+    display:flex;
+
+    align-items:center;
+
+    justify-content:space-between;
+
+    gap:8px;
+
+    padding:0 10px 0 58px;
+
+    box-sizing:border-box;
+
+    overflow:hidden;
+
+    z-index:5;
+
+    background:
+        rgba(255,255,255,.86) !important;
+
+    border-bottom:
+        1px solid
+        rgba(255,255,255,.98) !important;
+
+    backdrop-filter:
+        blur(20px)
+        saturate(125%);
+
+    -webkit-backdrop-filter:
+        blur(20px)
+        saturate(125%);
+
+}
+
+
+#logoText {
+
+    min-width:0;
+
+    flex:1 1 auto;
+
+    margin:0;
+
+    padding:0;
+
+    font-size:15px;
+
+    line-height:1.1;
+
+    white-space:nowrap;
+
+    overflow:hidden;
+
+    text-overflow:ellipsis;
+
+    color:#17212b !important;
+
+    font-weight:750;
+
+}
+
+
+#logoText .hasiru {
+
+    color:#138a3d !important;
+
+    font-weight:800;
+
+}
+
+
+/* =================================================
+   THEME BUTTON
+   ================================================= */
+
+#themeBtn {
+
+    display:flex !important;
+
+    flex:0 0 40px;
+
+    width:40px;
+
+    min-width:40px;
+
+    height:40px;
+
+    min-height:40px;
+
+    align-items:center;
+
+    justify-content:center;
+
+    border-radius:50% !important;
+
+    background:
+        rgba(255,255,255,.88) !important;
+
+    border:
+        1px solid
+        rgba(255,255,255,.98) !important;
+
+    backdrop-filter:
+        blur(12px);
+
+    -webkit-backdrop-filter:
+        blur(12px);
+
+    z-index:10;
+
+}
+
+
+/* =================================================
+   TABS
+   ================================================= */
+
+#tabs {
+
+    position:relative;
+
+    width:100%;
+
+    height:48px;
+
+    min-height:48px;
+
+    flex:0 0 48px;
+
+    display:flex;
+
+    padding:0 6px;
+
+    box-sizing:border-box;
+
+    overflow:hidden;
+
+    z-index:5;
+
+    background:
+        rgba(255,255,255,.78) !important;
+
+    border-bottom:
+        1px solid
+        rgba(255,255,255,.95) !important;
+
+    backdrop-filter:
+        blur(18px)
+        saturate(125%);
+
+    -webkit-backdrop-filter:
+        blur(18px)
+        saturate(125%);
+
+}
+
+
+.tab {
+
+    flex:1 1 0;
+
+    min-width:0;
+
+    height:48px;
+
+    padding:0 4px;
+
+    font-size:13px;
+
+    white-space:nowrap;
+
+    background:transparent !important;
+
+}
+
+
+/* =================================================
+   CONTENT
+   ================================================= */
+
+.tabContent {
+
+    width:100%;
+
+    min-width:0;
+
+    min-height:0;
+
+    overflow-x:hidden;
+
+    overflow-y:auto;
+
+    background:transparent !important;
+
+}
+
+
+#planner,
+#ranking,
+#trends {
+
+    width:100%;
+
+    max-width:100%;
+
+    box-sizing:border-box;
+
+    padding:10px 10px 18px;
+
+    overflow-x:hidden;
+
+    background:transparent !important;
+
+}
+
+
+/* =================================================
+   SEARCH GLASS PANEL
+   ================================================= */
+
+.searchCard {
+
+    width:100% !important;
+
+    max-width:100% !important;
+
+    box-sizing:border-box;
+
+    padding:14px;
+
+    border-radius:17px !important;
+
+    overflow:visible;
+
+    background:
+        rgba(255,255,255,.62) !important;
+
+    border:
+        1px solid
+        rgba(255,255,255,.78) !important;
+
+    box-shadow:
+
+        0 10px 28px
+        rgba(75,25,20,.12),
+
+        inset 0 1px 3px
+        rgba(255,255,255,.75);
+
+    backdrop-filter:
+        blur(12px)
+        saturate(120%);
+
+    -webkit-backdrop-filter:
+        blur(12px)
+        saturate(120%);
+
+}
+
+
+/* =================================================
+   INPUT BOX
+   ================================================= */
+
+.search-box {
+
+    position:relative;
+
+    width:100%;
+
+    max-width:100%;
+
+    min-width:0;
+
+    margin-bottom:10px;
+
+    overflow:visible;
+
+}
+
+
+.searchCard input {
+
+    display:block;
+
+    width:100% !important;
+
+    max-width:100% !important;
+
+    min-width:0;
+
+    height:46px;
+
+    padding:0 12px 0 40px;
+
+    box-sizing:border-box;
+
+    font-size:13px;
+
+    color:#263746 !important;
+
+    background:
+        rgba(255,255,255,.94) !important;
+
+    border:
+        1px solid
+        rgba(255,255,255,.99) !important;
+
+    border-radius:13px !important;
+
+    box-shadow:
+
+        inset 0 1px 3px
+        rgba(0,0,0,.045),
+
+        inset 0 1px 2px
+        rgba(255,255,255,1);
+
+}
+
+
+.searchCard input::placeholder {
+
+    color:#5c6d7b !important;
+
+}
+
+
+/* =================================================
+   SUGGESTIONS
+   ================================================= */
+
+.suggestions {
+
+    position:absolute;
+
+    top:50px;
+
+    left:0;
+
+    right:0;
+
+    width:100%;
+
+    max-height:190px;
+
+    box-sizing:border-box;
+
+    overflow-x:hidden;
+
+    overflow-y:auto;
+
+    z-index:99999;
+
+    border-radius:12px;
+
+    background:
+        rgba(255,255,255,.97) !important;
+
+    border:
+        1px solid
+        rgba(255,255,255,.99);
+
+    box-shadow:
+        0 12px 28px
+        rgba(0,0,0,.18);
+
+    backdrop-filter:
+        blur(18px);
+
+    -webkit-backdrop-filter:
+        blur(18px);
+
+}
+
+
+.suggestion {
+
+    width:100%;
+
+    box-sizing:border-box;
+
+    padding:11px 12px;
+
+    font-size:13px;
+
+    overflow:hidden;
+
+    text-overflow:ellipsis;
+
+    white-space:nowrap;
+
+}
+
+
+/* =================================================
+   BLUE BUTTONS
+   ================================================= */
+
+.searchCard button {
+
+    display:block;
+
+    width:100% !important;
+
+    max-width:100% !important;
+
+    height:46px;
+
+    box-sizing:border-box;
+
+    margin-top:6px;
+
+    font-size:13px;
+
+    border-radius:12px !important;
+
+    border:
+        1px solid
+        rgba(255,255,255,.55) !important;
+
+    box-shadow:
+        0 7px 18px
+        rgba(20,70,170,.22);
+
+}
+
+
+/* =================================================
+   ROUTE RESULTS
+   ================================================= */
+
+#routeResults {
+
+    width:100%;
+
+    max-width:100%;
+
+    box-sizing:border-box;
+
+    padding:0 10px 16px;
+
+    overflow-x:hidden;
+
+    overflow-y:auto;
+
+    background:transparent !important;
+
+}
+
+
+#routeInfo {
+
+    width:100%;
+
+    max-width:100%;
+
+    box-sizing:border-box;
+
+    margin-top:10px;
+
+    background:transparent !important;
+
+}
+
+
+/* =================================================
+   ROUTE CARDS
+   ================================================= */
+
+.routeOption {
+
+    width:100% !important;
+
+    max-width:100% !important;
+
+    box-sizing:border-box;
+
+    padding:12px;
+
+    margin-bottom:9px;
+
+    overflow:hidden;
+
+    border-radius:17px !important;
+
+    background:
+        rgba(255,255,255,.89) !important;
+
+    border:
+        1px solid
+        rgba(255,255,255,.99) !important;
+
+    box-shadow:
+
+        0 10px 25px
+        rgba(70,20,20,.14),
+
+        inset 0 1px 3px
+        rgba(255,255,255,1);
+
+    backdrop-filter:
+        blur(18px)
+        saturate(110%);
+
+    -webkit-backdrop-filter:
+        blur(18px)
+        saturate(110%);
+
+}
+
+
+.routeOption.activeRoute {
+
+    border:
+        2px solid
+        #1976e8 !important;
+
+    background:
+        rgba(255,255,255,.94) !important;
+
+    box-shadow:
+
+        0 8px 25px
+        rgba(25,118,232,.23),
+
+        inset 0 1px 3px
+        rgba(255,255,255,1);
+
+}
+
+
+.routeOption .aqiText,
+.routeOption .routeMeta,
+.routeOption .routeExposure {
+
+    color:#435565 !important;
+
+}
+
+
+.routeBadge {
+
+    max-width:100%;
+
+    padding:4px 9px;
+
+    font-size:10px;
+
+    white-space:nowrap;
+
+}
+
+
+.aqiBadge {
+
+    padding:5px 11px;
+
+    font-size:12px;
+
+}
+
+
+.aqiText {
+
+    font-size:12px;
+
+    margin-bottom:8px;
+
+    font-weight:600;
+
+}
+
+
+.routeMeta {
+
+    font-size:12px;
+
+    line-height:1.45;
+
+}
+
+
+.routeExposure {
+
+    font-size:11px;
+
+}
+
+
+/* =================================================
+   RANKING
+   ================================================= */
+
+#rankingCard {
+
+    width:100% !important;
+
+    max-width:100% !important;
+
+    box-sizing:border-box;
+
+    padding:15px;
+
+    border-radius:17px;
+
+    background:
+        rgba(255,255,255,.89) !important;
+
+    border:
+        1px solid
+        rgba(255,255,255,.98) !important;
+
+    backdrop-filter:
+        blur(18px);
+
+    -webkit-backdrop-filter:
+        blur(18px);
+
+    box-shadow:
+        0 10px 25px
+        rgba(70,20,20,.14);
+
+}
+
+
+/* =================================================
+   TRENDS
+   ================================================= */
+
+.trends-container {
+
+    width:100%;
+
+    max-width:100%;
+
+}
+
+
+.trend-card,
+.trend-stat,
+.period-card,
+.trend-insight {
+
+    box-sizing:border-box;
+
+    background:
+        rgba(255,255,255,.89) !important;
+
+    border:
+        1px solid
+        rgba(255,255,255,.98) !important;
+
+    backdrop-filter:
+        blur(18px);
+
+    -webkit-backdrop-filter:
+        blur(18px);
+
+}
+
+
+.trend-card {
+
+    width:100%;
+
+    padding:13px;
+
+    border-radius:17px;
+
+}
+
+
+.trend-card-header {
+
+    gap:8px;
+
+    flex-wrap:wrap;
+
+}
+
+
+.trend-period {
+
+    max-width:100%;
+
+    overflow-x:auto;
+
+    flex-shrink:1;
+
+}
+
+
+.trend-period-btn {
+
+    flex-shrink:0;
+
+}
+
+
+.chart-container {
+
+    width:100%;
+
+    height:190px;
+
+}
+
+
+/* =================================================
+   MAP CONTROLS
+   ================================================= */
+
+#mapControls {
+
+    top:12px !important;
+
+    right:12px !important;
+
+    z-index:1200 !important;
+
+}
+
+
+#mapControls > button {
+
+    min-height:42px !important;
+
+    padding:8px 11px !important;
+
+    font-size:12px !important;
+
+}
+
+
+/* =================================================
+   LEGEND
+   ================================================= */
+
+.leaflet-control.legend {
+
+    min-width:170px !important;
+
+    max-width:
+        calc(100vw - 20px) !important;
+
+    padding:9px 11px !important;
+
+    margin-right:8px !important;
+
+    margin-bottom:8px !important;
+
+    border-radius:11px !important;
+
+    font-size:10px !important;
+
+}
+
+
+/* =================================================
+   ROUTE SUMMARY
+   ================================================= */
+
+#routeSummary {
+
+    top:auto !important;
+
+    right:10px !important;
+
+    bottom:10px !important;
+
+    width:
+        calc(100vw - 20px) !important;
+
+    max-width:360px !important;
+
+    max-height:42vh !important;
+
+    overflow-x:hidden !important;
+
+    overflow-y:auto !important;
+
+    box-sizing:border-box !important;
+
+    padding:14px !important;
+
+    border-radius:17px !important;
+
+    background:
+        rgba(255,255,255,.90) !important;
+
+    border:
+        1px solid
+        rgba(255,255,255,.99) !important;
+
+    backdrop-filter:
+        blur(18px);
+
+    -webkit-backdrop-filter:
+        blur(18px);
+
+    box-shadow:
+        0 10px 28px
+        rgba(70,20,20,.18);
+
+}
+
+
+/* =================================================
+   MOBILE X BUTTON
+   ================================================= */
+
+#mobileMenuBtn {
+
+    width:38px !important;
+
+    height:38px !important;
+
+    min-width:38px !important;
+
+    min-height:38px !important;
+
+    padding:0 !important;
+
+    top:10px !important;
+
+    left:8px !important;
+
+    font-size:16px !important;
+
+    font-weight:400 !important;
+
+    line-height:38px !important;
+
+    border-radius:10px !important;
+
+    display:flex !important;
+
+    align-items:center !important;
+
+    justify-content:center !important;
+
+}
+
+
+}
+
+
+/* =====================================================
+   SMALL PHONES
+   ===================================================== */
+
+@media (max-width:520px) {
+
+
+#sidebar {
+
+    width:min(92vw,355px) !important;
+
+    max-width:355px !important;
+
+}
+
+
+#mobileMenuBtn {
+
+    top:10px !important;
+
+    left:8px !important;
+
+    width:38px !important;
+
+    height:38px !important;
+
+    min-width:38px !important;
+
+    min-height:38px !important;
+
+    font-size:16px !important;
+
+    font-weight:400 !important;
+
+    line-height:38px !important;
+
+}
+
+
+#topBar {
+
+    height:58px !important;
+
+    min-height:58px !important;
+
+    flex-basis:58px !important;
+
+    padding-left:53px !important;
+
+}
+
+
+#logoText {
+
+    font-size:15px !important;
+
+}
+
+
+#logoText .hasiru {
+
+    color:#138a3d !important;
+
+}
+
+
+#themeBtn {
+
+    width:38px !important;
+
+    min-width:38px !important;
+
+    height:38px !important;
+
+    min-height:38px !important;
+
+}
+
+
+#tabs {
+
+    height:46px !important;
+
+    min-height:46px !important;
+
+    flex-basis:46px !important;
+
+}
+
+
+.tab {
+
+    height:46px !important;
+
+    font-size:12px !important;
+
+}
+
+
+.searchCard {
+
+    padding:13px !important;
+
+}
+
+
+.searchCard input {
+
+    height:45px !important;
+
+    font-size:12.5px !important;
+
+}
+
+
+.searchCard button {
+
+    height:45px !important;
+
+}
+
+
+.routeOption {
+
+    padding:11px !important;
+
+}
+
+
+.routeMeta {
+
+    font-size:11.5px !important;
+
+}
+
+
+.chart-container {
+
+    height:180px !important;
+
+}
+
+}
+
+
+/* =====================================================
+   VERY SMALL PHONES
+   ===================================================== */
+
+@media (max-width:380px) {
+
+
+#sidebar {
+
+    width:100vw !important;
+
+    max-width:100vw !important;
+
+}
+
+
+#topBar {
+
+    padding-left:51px !important;
+
+}
+
+
+#planner,
+#ranking,
+#trends {
+
+    padding-left:8px !important;
+
+    padding-right:8px !important;
+
+}
+
+
+.searchCard {
+
+    padding:12px !important;
+
+}
+
+
+.searchCard input {
+
+    padding-left:38px !important;
+
+    padding-right:9px !important;
+
+}
+
+
+.searchCard button {
+
+    font-size:12px !important;
+
+}
+
+
+.chart-container {
+
+    height:165px !important;
+
+}
+
+}
+
+
+/* =====================================================
+   DARK MODE
+   ===================================================== */
+
+@media (max-width:800px) {
+
+
+body.dark #sidebar::before {
+
+    filter:
+        brightness(.62)
+        saturate(.95);
+
+}
+
+
+body.dark #topBar {
+
+    background:
+        rgba(20,25,35,.72) !important;
+
+}
+
+
+body.dark #tabs {
+
+    background:
+        rgba(20,25,35,.62) !important;
+
+}
+
+
+body.dark #logoText {
+
+    color:#ffffff !important;
+
+}
+
+
+body.dark #logoText .hasiru {
+
+    color:#19a957 !important;
+
+}
+
+
+body.dark .searchCard,
+body.dark .routeOption,
+body.dark #rankingCard,
+body.dark .trend-card,
+body.dark .trend-stat,
+body.dark .period-card,
+body.dark .trend-insight,
+body.dark #routeSummary {
+
+    background:
+        rgba(20,25,35,.72) !important;
+
+    border-color:
+        rgba(255,255,255,.30) !important;
+
+    color:#ffffff !important;
+
+}
+
+
+body.dark .searchCard input {
+
+    background:
+        rgba(15,23,42,.78) !important;
+
+    color:#ffffff !important;
+
+    border-color:
+        rgba(255,255,255,.32) !important;
+
+}
+
+
+/* =================================================
+   DARK MODE SUGGESTION DROPDOWN
+   ================================================= */
+
+body.dark .suggestions {
+
+    background:
+        rgba(25,30,40,.98) !important;
+
+    border:
+        1px solid
+        rgba(255,255,255,.32) !important;
+
+    color:#f8fafc !important;
+
+    box-shadow:
+        0 12px 30px
+        rgba(0,0,0,.55) !important;
+
+}
+
+
+body.dark .suggestion {
+
+    background:
+        transparent !important;
+
+    color:#f8fafc !important;
+
+}
+
+
+body.dark .suggestion:hover {
+
+    background:
+        rgba(255,255,255,.12) !important;
+
+    color:#ffffff !important;
+
+}
+
+
+/* =================================================
+   DARK MODE ROUTE CARD TEXT
+   ================================================= */
+
+body.dark .routeOption {
+
+    color:#ffffff !important;
+
+}
+
+
+body.dark .routeOption .aqiText {
+
+    color:#f1f5f9 !important;
+
+}
+
+
+body.dark .routeOption .routeMeta {
+
+    color:#e2e8f0 !important;
+
+}
+
+
+body.dark .routeOption .routeExposure {
+
+    color:#cbd5e1 !important;
+
+}
+
+
+body.dark .routeOption strong {
+
+    color:#ffffff !important;
+
+}
+
+
+body.dark .routeOption h3 {
+
+    color:#ffffff !important;
+
+}
+
+
+body.dark .routeOption p {
+
+    color:#e2e8f0 !important;
+
+}
+
+
+body.dark .routeOption span {
+
+    color:#e2e8f0 !important;
+
+}
+
+
+body.dark .routeOption .aqiBadge {
+
+    color:#000000 !important;
+
+}
+
+
+body.dark .routeOption .routeBadge {
+
+    color:#ffffff !important;
+
+}
+
+
+/* =================================================
+   DARK MODE X BUTTON
+   ================================================= */
+
+body.dark #mobileMenuBtn {
+
+    width:38px !important;
+
+    height:38px !important;
+
+    min-width:38px !important;
+
+    min-height:38px !important;
+
+    font-size:16px !important;
+
+    font-weight:400 !important;
+
+    line-height:38px !important;
+
+}
+
+}
+
+
+/* =====================================================
+   END DARK MODE
+   ================================================= */
+
+
+</style>
+
+</head>
+
+
+<body>
+
+
+<!-- =====================================================
+     MOBILE MENU
+     ===================================================== -->
+
+<button id="mobileMenuBtn"
+        type="button"
+        onclick="toggleMobileSidebar()"
+        aria-label="Open menu"
+        aria-controls="sidebar"
+        aria-expanded="false">
+
+    ☰
+
+</button>
+
+
+<!-- =====================================================
+     SIDEBAR
+     ===================================================== -->
+
+<div id="sidebar">
+
+
+<div id="topBar">
+
+
+<div id="logoText">
+
+    Bengaluru AQI Navigator
+    <span class="hasiru">[ಹಸಿರು]</span>
+
+</div>
+
+
+<button id="themeBtn"
+        onclick="toggleTheme()"
+        aria-label="Toggle theme">
+
+    ◐
+
+</button>
+
+
+</div>
+
+
+<div id="tabs">
+
+
+<button class="tab active"
+        onclick="showTab('planner')">
+
+    Planner
+
+</button>
+
+
+<button class="tab"
+        onclick="showTab('ranking')">
+
+    Ranking
+
+</button>
+
+
+<button class="tab"
+        onclick="showTab('trends')">
+
+    Trends
+
+</button>
+
+
+</div>
+
+
+<!-- =================================================
+     PLANNER
+     ================================================= -->
+
+<div class="tabContent"
+     id="planner">
+
+
+<div class="searchCard">
+
+
+<div class="search-box">
+
+
+<span class="input-marker source-marker"
+      aria-hidden="true">
+</span>
+
+
+<input
+    id="sourceInput"
+    value="Your location"
+    placeholder="Your location"
+    autocomplete="off"
+    readonly>
+
+
+<div
+    id="sourceSuggestions"
+    class="suggestions">
+</div>
+
+
+</div>
+
+
+<div class="search-box">
+
+
+<span class="input-marker destination-marker"
+      aria-hidden="true">
+</span>
+
+
+<input
+    id="destinationInput"
+    placeholder="Enter destination"
+    autocomplete="off">
+
+
+<div
+    id="destinationSuggestions"
+    class="suggestions">
+</div>
+
+
+</div>
+
+
+<button id="routeBtn"
+        onclick="findRoute()">
+
+    Find Cleanest Route
+
+</button>
+
+
+<button onclick="clearRoute()">
+
+    Clear
+
+</button>
+
+
+</div>
+
+
+<div id="routeResults">
+
+
+<div id="routeInfo">
+
+    Enter destination.
+
+</div>
+
+
+</div>
+
+
+</div>
+
+
+<!-- =================================================
+     RANKING
+     ================================================= -->
+
+<div class="tabContent"
+     id="ranking"
+     style="display:none;">
+
+
+<div id="rankingCard">
+
+
+<h3>
+
+    Air Quality Ranking
+
+</h3>
+
+
+<div id="rankingContent">
+
+    Loading...
+
+</div>
+
+
+</div>
+
+
+</div>
+
+
+<!-- =================================================
+     TRENDS
+     ================================================= -->
+
+<div class="tabContent"
+     id="trends"
+     style="display:none;">
+
+
+<div class="trends-container">
+
+
+<div class="trends-header">
+
+
+<h2>
+
+    AQI Trends
+
+</h2>
+
+
+<p>
+
+    Air quality history and station analysis
+
+</p>
+
+
+</div>
+
+
+<div class="trend-control">
+
+
+<label for="trendStation">
+
+    Station
+
+</label>
+
+
+<select id="trendStation">
+
+
+<option value="">
+
+    Select station
+
+</option>
+
+
+</select>
+
+
+</div>
+
+
+<div class="trend-summary">
+
+
+<div class="trend-stat">
+
+
+<span class="trend-stat-label">
+
+    Current AQI
+
+</span>
+
+
+<strong id="trendCurrentAQI">
+
+    --
+
+</strong>
+
+
+<span id="trendCurrentCategory"
+      class="trend-aqi-category">
+
+    --
+
+</span>
+
+
+</div>
+
+
+<div class="trend-stat">
+
+
+<span class="trend-stat-label">
+
+    7D Average
+
+</span>
+
+
+<strong id="trendAverageAQI">
+
+    --
+
+</strong>
+
+
+<span id="trendAverageCategory"
+      class="trend-aqi-category">
+
+    --
+
+</span>
+
+
+</div>
+
+
+</div>
+
+
+<div class="trend-card">
+
+
+<div class="trend-card-header">
+
+
+<div>
+
+
+<h3>
+
+    AQI History
+
+</h3>
+
+
+<span id="trendChartPeriodText">
+
+    Last 7 days
+
+</span>
+
+
+</div>
+
+
+<div class="trend-period">
+
+
+<button
+    class="trend-period-btn active"
+    data-period="7">
+
+    7D
+
+</button>
+
+
+<button
+    class="trend-period-btn"
+    data-period="30">
+
+    30D
+
+</button>
+
+
+</div>
+
+
+</div>
+
+
+<div class="chart-container">
+
+
+<canvas id="aqiTrendChart"></canvas>
+
+
+</div>
+
+
+</div>
+
+
+<div class="period-card">
+
+
+<div class="period-item">
+
+
+<span>
+
+    Best Period
+
+</span>
+
+
+<strong id="trendBestPeriod">
+
+    --
+
+</strong>
+
+
+</div>
+
+
+<div class="period-divider"></div>
+
+
+<div class="period-item">
+
+
+<span>
+
+    Worst Period
+
+</span>
+
+
+<strong id="trendWorstPeriod">
+
+    --
+
+</strong>
+
+
+</div>
+
+
+</div>
+
+
+<div class="trend-insight">
+
+
+<div class="insight-title">
+
+    Trend Insight
+
+</div>
+
+
+<p id="trendInsightText">
+
+    Select a station to view AQI trends.
+
+</p>
+
+
+</div>
+
+
+</div>
+
+
+</div>
+
+
+</div>
+
+
+</div>
+
+
+<!-- =====================================================
+     MAP
+     ===================================================== -->
+
+<div id="map"></div>
+
+
+<!-- =====================================================
+     MAP CONTROLS
+     ===================================================== -->
+
+<div id="mapControls">
+
+
+<button onclick="toggleLayers()">
+
+    Layers
+
+</button>
+
+
+<div id="layerPanel">
+
+
+<label>
+
+
+<input
+    type="checkbox"
+    checked
+    id="heatLayerChk"
+    onchange="toggleHeatmap()">
+
+
+Heatmap
+
+
+</label>
+
+
+<br>
+
+
+<label>
+
+
+<input
+    type="checkbox"
+    checked
+    id="stationLayerChk"
+    onchange="toggleStations()">
+
+
+AQI Stations
+
+
+</label>
+
+
+</div>
+
+
+</div>
+
+
+<!-- =====================================================
+     ROUTE SUMMARY
+     ===================================================== -->
+
+<div id="routeSummary">
+
+
+<h3>
+
+    Route Summary
+
+</h3>
+
+
+<div id="summaryContent">
+
+    Search for a route.
+
+</div>
+
+
+</div>
+
+
+<!-- =====================================================
+     LOADING
+     ===================================================== -->
+
+<div id="loadingOverlay">
+
+
+<div class="loader"></div>
+
+
+<p>
+
+    Finding safest route...
+
+</p>
+
+
+</div>
+
+
+<!-- =====================================================
+     DETAILS MODAL
+     ===================================================== -->
+
+<div id="detailsModal"
+     class="modal">
+
+
+<div class="modal-content">
+
+
+<span id="closeModal">
+
+    &times;
+
+</span>
+
+
+<div id="detailsContent"></div>
+
+
+</div>
+
+
+</div>
+
+
+<!-- =====================================================
+     EXISTING JAVASCRIPT
+     ===================================================== -->
+
+<script src="{{ url_for('static', filename='js/heatmap.js') }}">
+</script>
+
+
+<script src="{{ url_for('static', filename='js/map.js') }}">
+</script>
+
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js">
+</script>
+
+
+<script src="{{ url_for('static', filename='js/history.js') }}">
+</script>
+
+
+<script src="{{ url_for('static', filename='js/stations.js') }}">
+</script>
+
+
+<script src="{{ url_for('static', filename='js/routing.js') }}">
+</script>
+
+
+<script src="{{ url_for('static', filename='js/ranking.js') }}?v=2">
+</script>
+
+
+<script src="{{ url_for('static', filename='js/sidebar.js') }}">
+</script>
+
+
+<script src="{{ url_for('static', filename='js/theme.js') }}">
+</script>
+
+
+<script src="{{ url_for('static', filename='js/search.js') }}">
+</script>
+
+
+<!-- =====================================================
+     MOBILE SIDEBAR CONTROL
+     ===================================================== -->
+
+<script>
+
+(function () {
+
+
+function isMobile() {
+
+    return window.matchMedia(
+        "(max-width:800px)"
+    ).matches;
+
+}
+
+
+function refreshMobileMap() {
+
+    setTimeout(function () {
+
+        if (
+            typeof map !== "undefined" &&
+            map &&
+            typeof map.invalidateSize ===
+            "function"
+        ) {
+
+            map.invalidateSize();
+
+        }
+
+    },350);
+
+}
+
+
+function updateMobileMenuState(
+    isOpen
+) {
+
+    const button =
+        document.getElementById(
+            "mobileMenuBtn"
+        );
+
+
+    if (!button) {
+
+        return;
+
+    }
+
+
+    button.setAttribute(
+        "aria-expanded",
+        isOpen ? "true" : "false"
+    );
+
+
+    button.setAttribute(
+        "aria-label",
+        isOpen
+            ? "Close menu"
+            : "Open menu"
+    );
+
+
+    button.textContent =
+        isOpen ? "✕" : "☰";
+
+}
+
+
+function setMobileSidebarState(
+    isOpen
+) {
+
+    const sidebar =
+        document.getElementById(
+            "sidebar"
+        );
+
+
+    if (!sidebar) {
+
+        return;
+
+    }
+
+
+    if (isOpen) {
+
+        sidebar.classList.add(
+            "mobile-open"
+        );
+
+
+        sidebar.classList.remove(
+            "mobile-hidden"
+        );
+
+
+        document.body.classList.add(
+            "sidebar-open"
+        );
+
+
+        updateMobileMenuState(
+            true
+        );
+
+    }
+
+    else {
+
+        sidebar.classList.remove(
+            "mobile-open"
+        );
+
+
+        sidebar.classList.add(
+            "mobile-hidden"
+        );
+
+
+        document.body.classList.remove(
+            "sidebar-open"
+        );
+
+
+        updateMobileMenuState(
+            false
+        );
+
+    }
+
+
+    refreshMobileMap();
+
+}
+
+
+window.toggleMobileSidebar =
+    function () {
+
+        if (!isMobile()) {
+
+            return;
+
+        }
+
+
+        const sidebar =
+            document.getElementById(
+                "sidebar"
+            );
+
+
+        if (!sidebar) {
+
+            return;
+
+        }
+
+
+        const isOpen =
+            sidebar.classList.contains(
+                "mobile-open"
+            );
+
+
+        setMobileSidebarState(
+            !isOpen
+        );
+
+    };
+
+
+window.closeMobileSidebar =
+    function () {
+
+        if (!isMobile()) {
+
+            return;
+
+        }
+
+
+        setMobileSidebarState(
+            false
+        );
+
+    };
+
+
+window.openMobileSidebar =
+    function () {
+
+        if (!isMobile()) {
+
+            return;
+
+        }
+
+
+        setMobileSidebarState(
+            true
+        );
+
+    };
+
+
+function initializeMobileSidebar() {
+
+    const sidebar =
+        document.getElementById(
+            "sidebar"
+        );
+
+
+    if (!sidebar) {
+
+        return;
+
+    }
+
+
+    if (isMobile()) {
+
+        sidebar.classList.remove(
+            "mobile-open"
+        );
+
+
+        sidebar.classList.add(
+            "mobile-hidden"
+        );
+
+
+        document.body.classList.remove(
+            "sidebar-open"
+        );
+
+
+        updateMobileMenuState(
+            false
+        );
+
+    }
+
+    else {
+
+        sidebar.classList.remove(
+            "mobile-open"
+        );
+
+
+        sidebar.classList.remove(
+            "mobile-hidden"
+        );
+
+
+        document.body.classList.remove(
+            "sidebar-open"
+        );
+
+    }
+
+
+    refreshMobileMap();
+
+}
+
+
+if (
+    document.readyState ===
+    "loading"
+) {
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        initializeMobileSidebar
+    );
+
+}
+
+else {
+
+    initializeMobileSidebar();
+
+}
+
+
+window.addEventListener(
+    "resize",
+    function () {
+
+        const sidebar =
+            document.getElementById(
+                "sidebar"
+            );
+
+
+        if (!sidebar) {
+
+            return;
+
+        }
+
+
+        if (isMobile()) {
+
+            if (
+                !sidebar.classList.contains(
+                    "mobile-open"
+                )
+            ) {
+
+                sidebar.classList.add(
+                    "mobile-hidden"
+                );
+
+
+                updateMobileMenuState(
+                    false
+                );
+
+            }
+
+        }
+
+        else {
+
+            sidebar.classList.remove(
+                "mobile-open"
+            );
+
+
+            sidebar.classList.remove(
+                "mobile-hidden"
+            );
+
+
+            document.body.classList.remove(
+                "sidebar-open"
+            );
+
+        }
+
+
+        refreshMobileMap();
+
+    }
+);
+
+
+})();
+
+</script>
+
+
+</body>
+
+</html>
