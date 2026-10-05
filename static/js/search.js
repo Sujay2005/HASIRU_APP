@@ -1,35 +1,60 @@
 console.log("search.js loaded");
 
 
+let searchTimer = null;
+
+let searchRequestId = 0;
+
+
+// ============================================================
+// SEARCH PLACES
+// ============================================================
+
 async function searchPlaces(
     query,
     suggestionBox,
     inputBox
 ) {
 
-    console.log("Searching:", query);
+    console.log(
+        "Searching:",
+        query
+    );
 
 
-    if (query.trim().length < 3) {
+    const cleanQuery =
+        query.trim();
 
-        suggestionBox.style.display = "none";
+
+    if (
+        cleanQuery.length < 3
+    ) {
+
+        suggestionBox.innerHTML = "";
+
+        suggestionBox.style.display =
+            "none";
 
         return;
+
     }
+
+
+    const requestId =
+        ++searchRequestId;
 
 
     try {
 
         /*
-         * IMPORTANT:
-         * Do NOT call Nominatim directly from the browser.
-         *
-         * Flask now acts as the geocoding proxy.
+         * Flask acts as the geocoding proxy.
          */
 
         const url =
             "/geocode?q=" +
-            encodeURIComponent(query);
+            encodeURIComponent(
+                cleanQuery
+            );
 
 
         console.log(
@@ -40,6 +65,20 @@ async function searchPlaces(
 
         const response =
             await fetch(url);
+
+
+        /*
+         * Ignore older requests.
+         */
+
+        if (
+            requestId !==
+            searchRequestId
+        ) {
+
+            return;
+
+        }
 
 
         if (!response.ok) {
@@ -62,7 +101,8 @@ async function searchPlaces(
         );
 
 
-        suggestionBox.innerHTML = "";
+        suggestionBox.innerHTML =
+            "";
 
 
         if (
@@ -75,14 +115,20 @@ async function searchPlaces(
                 "No locations found" +
                 "</div>";
 
+
             suggestionBox.style.display =
                 "block";
 
+
             return;
+
         }
 
 
-        data.slice(0, 5).forEach(
+        data.slice(
+            0,
+            5
+        ).forEach(
             place => {
 
                 const div =
@@ -204,8 +250,17 @@ async function searchPlaces(
 
 
     }
-
     catch (error) {
+
+        if (
+            requestId !==
+            searchRequestId
+        ) {
+
+            return;
+
+        }
+
 
         console.error(
             "Location search error:",
@@ -227,9 +282,40 @@ async function searchPlaces(
 }
 
 
-/* ================================================= */
-/* SOURCE */
-/* ================================================= */
+// ============================================================
+// DEBOUNCED SEARCH
+// ============================================================
+
+function scheduleSearch(
+    inputBox,
+    suggestionBox
+) {
+
+    clearTimeout(
+        searchTimer
+    );
+
+
+    searchTimer =
+        setTimeout(
+            function () {
+
+                searchPlaces(
+                    inputBox.value,
+                    suggestionBox,
+                    inputBox
+                );
+
+            },
+            700
+        );
+
+}
+
+
+// ============================================================
+// SOURCE
+// ============================================================
 
 const sourceInput =
     document.getElementById(
@@ -264,10 +350,9 @@ if (
         "input",
         function () {
 
-            searchPlaces(
-                this.value,
-                sourceSuggestions,
-                sourceInput
+            scheduleSearch(
+                sourceInput,
+                sourceSuggestions
             );
 
         }
@@ -281,9 +366,9 @@ if (
 }
 
 
-/* ================================================= */
-/* DESTINATION */
-/* ================================================= */
+// ============================================================
+// DESTINATION
+// ============================================================
 
 const destinationInput =
     document.getElementById(
@@ -318,10 +403,9 @@ if (
         "input",
         function () {
 
-            searchPlaces(
-                this.value,
-                destinationSuggestions,
-                destinationInput
+            scheduleSearch(
+                destinationInput,
+                destinationSuggestions
             );
 
         }
