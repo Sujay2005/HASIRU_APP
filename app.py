@@ -19,7 +19,6 @@ from services.routing import (
 from services.estimate import estimate_aqi
 
 import json
-import time
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -27,17 +26,6 @@ from datetime import datetime, timezone
 
 
 app = Flask(__name__)
-
-
-# ============================================================
-# GEOCODING CACHE
-# ============================================================
-
-geocode_cache = {}
-
-last_geocode_time = 0
-
-GEOCODE_DELAY = 1.0
 
 
 # ============================================================
@@ -59,8 +47,6 @@ def home():
 @app.route("/geocode")
 def geocode():
 
-    global last_geocode_time
-
     query = request.args.get(
         "q",
         ""
@@ -71,79 +57,53 @@ def geocode():
         return jsonify([])
 
 
-    # --------------------------------------------------------
-    # CACHE
-    # --------------------------------------------------------
+    # Bengaluru city center.
+    # Used only to prioritize nearby results.
 
-    cache_key = query.lower()
-
-    if cache_key in geocode_cache:
-
-        print(
-            "Geocode cache hit:",
-            query
-        )
-
-        return jsonify(
-            geocode_cache[cache_key]
-        )
-
-
-    # --------------------------------------------------------
-    # RATE CONTROL
-    # --------------------------------------------------------
-
-    elapsed = (
-        time.time()
-        - last_geocode_time
-    )
-
-    if elapsed < GEOCODE_DELAY:
-
-        time.sleep(
-            GEOCODE_DELAY - elapsed
-        )
+    BENGALURU_LON = 77.5946
+    BENGALURU_LAT = 12.9716
 
 
     # ========================================================
-    # PRIMARY GEOCODER: ARCGIS
+    # ARC GIS AUTOCOMPLETE
     # ========================================================
 
     try:
 
         params = urlencode({
 
-            "SingleLine":
+            "text":
                 query,
 
-            "f":
-                "json",
-
-            "maxLocations":
-                5,
-
-            "outFields":
-                "*",
+            "location":
+                f"{BENGALURU_LON},{BENGALURU_LAT}",
 
             "countryCode":
                 "IND",
 
-            "forStorage":
-                "false"
+            "maxSuggestions":
+                8,
+
+            "returnCollections":
+                "false",
+
+            "f":
+                "json"
 
         })
 
 
-        url = (
-            "https://geocode.arcgis.com/arcgis/rest/services/"
-            "World/GeocodeServer/findAddressCandidates?"
+        suggest_url = (
+            "https://geocode.arcgis.com/"
+            "arcgis/rest/services/"
+            "World/GeocodeServer/suggest?"
             + params
         )
 
 
         req = Request(
 
-            url,
+            suggest_url,
 
             headers={
 
@@ -158,15 +118,12 @@ def geocode():
         )
 
 
-        last_geocode_time = time.time()
-
-
         with urlopen(
             req,
-            timeout=15
+            timeout=10
         ) as response:
 
-            data = json.loads(
+            suggest_data = json.loads(
 
                 response.read().decode(
                     "utf-8"
@@ -175,67 +132,204 @@ def geocode():
             )
 
 
+        suggestions = (
+            suggest_data
+            .get(
+                "suggestions",
+                []
+            )
+        )
+
+
         results = []
 
 
-        for candidate in data.get(
-            "candidates",
-            []
-        ):
+        # ====================================================
+        # CONVERT EACH SUGGESTION TO LAT/LON
+        # ====================================================
 
-            location = candidate.get(
-                "location",
-                {}
-            )
+        for suggestion in suggestions:
 
-
-            lat = location.get(
-                "y"
-            )
-
-            lon = location.get(
-                "x"
-            )
-
-
-            address = candidate.get(
-                "address",
+            text = suggestion.get(
+                "text",
                 ""
             )
 
+            magic_key = suggestion.get(
+                "magicKey"
+            )
 
-            if (
-                lat is None
-                or lon is None
-                or not address
-            ):
+
+            if not text:
 
                 continue
 
 
-            results.append({
+            # ------------------------------------------------
+            # FIND ACTUAL LOCATION
+            # ------------------------------------------------
 
-                "lat":
-                    str(lat),
+            find_params = {
 
-                "lon":
-                    str(lon),
+                "SingleLine":
+                    text,
 
-                "display_name":
-                    address
+                "f":
+                    "json",
 
-            })
+                "maxLocations":
+                    1,
 
+                "outFields":
+                    "*",
+
+                "countryCode":
+                    "IND",
+
+                "location":
+                    f"{BENGALURU_LON},{BENGALURU_LAT}",
+
+                "forStorage":
+                    "false"
+
+            }
+
+
+            if magic_key:
+
+                find_params[
+                    "magicKey"
+                ] = magic_key
+
+
+            find_url = (
+
+                "https://geocode.arcgis.com/"
+                "arcgis/rest/services/"
+                "World/GeocodeServer/"
+                "findAddressCandidates?"
+                + urlencode(
+                    find_params
+                )
+
+            )
+
+
+            find_req = Request(
+
+                find_url,
+
+                headers={
+
+                    "User-Agent":
+                        "HASIRU-AQI-Navigator/1.0",
+
+                    "Accept":
+                        "application/json"
+
+                }
+
+            )
+
+
+            try:
+
+                with urlopen(
+                    find_req,
+                    timeout=10
+                ) as find_response:
+
+                    find_data = json.loads(
+
+                        find_response
+                        .read()
+                        .decode(
+                            "utf-8"
+                        )
+
+                    )
+
+
+                candidates = (
+                    find_data
+                    .get(
+                        "candidates",
+                        []
+                    )
+                )
+
+
+                if not candidates:
+
+                    continue
+
+
+                candidate = candidates[0]
+
+
+                location = candidate.get(
+                    "location",
+                    {}
+                )
+
+
+                lat = location.get(
+                    "y"
+                )
+
+                lon = location.get(
+                    "x"
+                )
+
+
+                if (
+                    lat is None
+                    or lon is None
+                ):
+
+                    continue
+
+
+                address = (
+                    candidate.get(
+                        "address"
+                    )
+                    or text
+                )
+
+
+                results.append({
+
+                    "lat":
+                        str(lat),
+
+                    "lon":
+                        str(lon),
+
+                    "display_name":
+                        address
+
+                })
+
+
+            except Exception as e:
+
+                print(
+                    "ArcGIS candidate error:",
+                    e
+                )
+
+
+        # ====================================================
+        # RETURN RESULTS
+        # ====================================================
 
         if results:
 
-            geocode_cache[
-                cache_key
-            ] = results
-
             print(
-                "ArcGIS geocoding successful:",
+                "ArcGIS autocomplete:",
                 query,
+                "->",
                 len(results),
                 "results"
             )
@@ -248,8 +342,7 @@ def geocode():
     except Exception as e:
 
         print(
-            "ArcGIS geocoding failed:",
-            query,
+            "ArcGIS autocomplete failed:",
             e
         )
 
@@ -304,38 +397,20 @@ def geocode():
         )
 
 
-        last_geocode_time = time.time()
-
-
         with urlopen(
             req,
-            timeout=15
+            timeout=10
         ) as response:
 
             data = json.loads(
 
-                response.read().decode(
+                response
+                .read()
+                .decode(
                     "utf-8"
                 )
 
             )
-
-
-        if isinstance(
-            data,
-            list
-        ):
-
-            geocode_cache[
-                cache_key
-            ] = data
-
-
-        print(
-            "Nominatim geocoding successful:",
-            query,
-            len(data)
-        )
 
 
         return jsonify(
@@ -346,8 +421,7 @@ def geocode():
     except Exception as e:
 
         print(
-            "Nominatim geocoding failed:",
-            query,
+            "Nominatim fallback failed:",
             e
         )
 
