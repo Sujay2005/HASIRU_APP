@@ -1,12 +1,9 @@
 console.log("search.js loaded");
 
 
-let searchController = null;
-
-
-/* ================================================= */
-/* SEARCH PLACES */
-/* ================================================= */
+// ============================================================
+// SEARCH PLACES
+// ============================================================
 
 async function searchPlaces(
     query,
@@ -19,69 +16,31 @@ async function searchPlaces(
         query
     );
 
+    query = query.trim();
 
-    const cleanQuery =
-        query.trim();
+    if (query.length < 2) {
 
-
-    if (
-        cleanQuery.length < 3
-    ) {
+        suggestionBox.innerHTML = "";
 
         suggestionBox.style.display =
             "none";
 
         return;
-
     }
-
-
-    /* --------------------------------------------- */
-    /* CANCEL PREVIOUS REQUEST */
-    /* --------------------------------------------- */
-
-    if (searchController) {
-
-        searchController.abort();
-
-    }
-
-
-    searchController =
-        new AbortController();
-
 
     try {
 
-        /*
-         * IMPORTANT:
-         * No debounce and no artificial delay.
-         *
-         * ArcGIS autocomplete is called immediately.
-         */
-
         const url =
             "/autocomplete?q=" +
-            encodeURIComponent(
-                cleanQuery
-            );
-
+            encodeURIComponent(query);
 
         console.log(
             "Autocomplete URL:",
             url
         );
 
-
         const response =
-            await fetch(
-                url,
-                {
-                    signal:
-                        searchController.signal
-                }
-            );
-
+            await fetch(url);
 
         if (!response.ok) {
 
@@ -89,23 +48,22 @@ async function searchPlaces(
                 "Autocomplete HTTP error: " +
                 response.status
             );
-
         }
-
 
         const data =
             await response.json();
-
 
         console.log(
             "Autocomplete results:",
             data
         );
 
+        suggestionBox.innerHTML = "";
 
-        suggestionBox.innerHTML =
-            "";
 
+        // ====================================================
+        // NO RESULTS
+        // ====================================================
 
         if (
             !Array.isArray(data) ||
@@ -121,222 +79,130 @@ async function searchPlaces(
                 "block";
 
             return;
-
         }
 
 
-        /* ----------------------------------------- */
-        /* CREATE DROPDOWN */
-        /* ----------------------------------------- */
+        // ====================================================
+        // DISPLAY RESULTS
+        // ====================================================
 
-        data.slice(
-            0,
-            5
-        ).forEach(
-            place => {
+        data
+            .slice(0, 5)
+            .forEach(place => {
 
                 const div =
                     document.createElement(
                         "div"
                     );
 
-
+                // Keep your existing dropdown class.
                 div.className =
                     "suggestion";
-
 
                 div.textContent =
                     "📍 " +
                     place.display_name;
 
 
-                /* --------------------------------- */
-                /* CLICK */
-                /* --------------------------------- */
+                // =================================================
+                // CLICK RESULT
+                // =================================================
 
                 div.addEventListener(
                     "click",
-                    async function () {
+                    function () {
 
                         inputBox.value =
                             place.display_name;
-
 
                         suggestionBox.style.display =
                             "none";
 
 
-                        /*
-                         * Resolve the selected
-                         * suggestion only after
-                         * the user clicks it.
-                         *
-                         * This does NOT slow down
-                         * the dropdown.
-                         */
+                        const lat =
+                            parseFloat(
+                                place.lat
+                            );
 
-                        try {
-
-                            const resolveUrl =
-                                "/geocode_resolve?q=" +
-                                encodeURIComponent(
-                                    place.display_name
-                                ) +
-                                "&magicKey=" +
-                                encodeURIComponent(
-                                    place.magicKey || ""
-                                );
-
-
-                            const response =
-                                await fetch(
-                                    resolveUrl
-                                );
-
-
-                            if (!response.ok) {
-
-                                throw new Error(
-                                    "Location resolve HTTP error: " +
-                                    response.status
-                                );
-
-                            }
-
-
-                            const resolved =
-                                await response.json();
-
-
-                            if (
-                                !Array.isArray(
-                                    resolved
-                                ) ||
-                                resolved.length === 0
-                            ) {
-
-                                return;
-
-                            }
-
-
-                            const selected =
-                                resolved[0];
-
-
-                            const lat =
-                                parseFloat(
-                                    selected.lat
-                                );
-
-
-                            const lon =
-                                parseFloat(
-                                    selected.lon
-                                );
-
-
-                            if (
-                                !Number.isFinite(
-                                    lat
-                                ) ||
-                                !Number.isFinite(
-                                    lon
-                                )
-                            ) {
-
-                                return;
-
-                            }
-
-
-                            console.log(
-                                "Selected location:",
-                                lat,
-                                lon
+                        const lon =
+                            parseFloat(
+                                place.lon
                             );
 
 
-                            /* --------------------- */
-                            /* MOVE MAP */
-                            /* --------------------- */
+                        console.log(
+                            "Selected location:",
+                            lat,
+                            lon
+                        );
+
+
+                        if (
+                            !Number.isFinite(lat) ||
+                            !Number.isFinite(lon)
+                        ) {
+
+                            console.error(
+                                "Invalid coordinates:",
+                                place
+                            );
+
+                            return;
+                        }
+
+
+                        // =============================================
+                        // MOVE MAP
+                        // =============================================
+
+                        if (
+                            typeof map !==
+                            "undefined"
+                        ) {
+
+                            map.setView(
+                                [
+                                    lat,
+                                    lon
+                                ],
+                                15
+                            );
+
+
+                            // =========================================
+                            // REMOVE OLD SEARCH MARKER
+                            // =========================================
 
                             if (
-                                typeof map !==
-                                "undefined" &&
-                                map
-                            ) {
-
-                                map.setView(
-                                    [
-                                        lat,
-                                        lon
-                                    ],
-                                    15
-                                );
-
-                            }
-
-
-                            /* --------------------- */
-                            /* REMOVE OLD MARKER */
-                            /* --------------------- */
-
-                            if (
-                                window.searchMarker &&
-                                typeof map !==
-                                "undefined" &&
-                                map
+                                window.searchMarker
                             ) {
 
                                 map.removeLayer(
                                     window.searchMarker
                                 );
-
                             }
 
 
-                            /* --------------------- */
-                            /* CREATE MARKER */
-                            /* --------------------- */
+                            // =========================================
+                            // ADD NEW SEARCH MARKER
+                            // =========================================
 
-                            if (
-                                typeof map !==
-                                "undefined" &&
-                                map
-                            ) {
-
-                                window.searchMarker =
-                                    L.marker(
-                                        [
-                                            lat,
-                                            lon
-                                        ]
-                                    )
-                                    .addTo(
-                                        map
-                                    )
-                                    .bindPopup(
-                                        "<b>" +
-                                        "Selected Location" +
-                                        "</b><br>" +
-                                        selected.display_name
-                                    )
-                                    .openPopup();
-
-                            }
-
+                            window.searchMarker =
+                                L.marker(
+                                    [
+                                        lat,
+                                        lon
+                                    ]
+                                )
+                                .addTo(map)
+                                .bindPopup(
+                                    "<b>" +
+                                    "Selected Location" +
+                                    "</b><br>" +
+                                    place.display_name
+                                )
+                                .openPopup();
                         }
-
-                        catch (error) {
-
-                            console.error(
-                                "Location resolve error:",
-                                error
-                            );
-
-                        }
-
                     }
                 );
 
@@ -344,9 +210,7 @@ async function searchPlaces(
                 suggestionBox.appendChild(
                     div
                 );
-
-            }
-        );
+            });
 
 
         suggestionBox.style.display =
@@ -354,22 +218,7 @@ async function searchPlaces(
 
 
     }
-
     catch (error) {
-
-        /*
-         * Ignore cancelled requests.
-         */
-
-        if (
-            error.name ===
-            "AbortError"
-        ) {
-
-            return;
-
-        }
-
 
         console.error(
             "Location search error:",
@@ -385,21 +234,18 @@ async function searchPlaces(
 
         suggestionBox.style.display =
             "block";
-
     }
-
 }
 
 
-/* ================================================= */
-/* SOURCE */
-/* ================================================= */
+// ============================================================
+// SOURCE INPUT
+// ============================================================
 
 const sourceInput =
     document.getElementById(
         "sourceInput"
     );
-
 
 const sourceSuggestions =
     document.getElementById(
@@ -411,7 +257,6 @@ console.log(
     "Source input:",
     sourceInput
 );
-
 
 console.log(
     "Source suggestions:",
@@ -437,23 +282,20 @@ if (
         }
     );
 
-
     console.log(
         "Source search listener attached"
     );
-
 }
 
 
-/* ================================================= */
-/* DESTINATION */
-/* ================================================= */
+// ============================================================
+// DESTINATION INPUT
+// ============================================================
 
 const destinationInput =
     document.getElementById(
         "destinationInput"
     );
-
 
 const destinationSuggestions =
     document.getElementById(
@@ -465,7 +307,6 @@ console.log(
     "Destination input:",
     destinationInput
 );
-
 
 console.log(
     "Destination suggestions:",
@@ -491,10 +332,42 @@ if (
         }
     );
 
-
     console.log(
         "Destination search listener attached"
     );
-
 }
-``` :chatgpt-content-reference{index="0"}
+
+
+// ============================================================
+// CLOSE DROPDOWNS WHEN CLICKING OUTSIDE
+// ============================================================
+
+document.addEventListener(
+    "click",
+    function (event) {
+
+        if (
+            sourceInput &&
+            sourceSuggestions &&
+            !sourceInput.contains(event.target) &&
+            !sourceSuggestions.contains(event.target)
+        ) {
+
+            sourceSuggestions.style.display =
+                "none";
+        }
+
+
+        if (
+            destinationInput &&
+            destinationSuggestions &&
+            !destinationInput.contains(event.target) &&
+            !destinationSuggestions.contains(event.target)
+        ) {
+
+            destinationSuggestions.style.display =
+                "none";
+        }
+
+    }
+);
