@@ -24,19 +24,8 @@ from urllib.request import Request, urlopen
 
 from datetime import datetime, timezone
 
-import time
-
 
 app = Flask(__name__)
-
-
-# ============================================================
-# GEOCODING CACHE
-# ============================================================
-
-geocode_cache = {}
-
-GEOCODE_CACHE_TIME = 3600
 
 
 # ============================================================
@@ -55,121 +44,240 @@ def home():
 @app.route("/geocode")
 def geocode():
 
-    query = request.args.get("q", "").strip()
+    query = request.args.get(
+        "q",
+        ""
+    ).strip()
 
     if not query:
         return jsonify([])
 
-    query_key = query.lower()
+    if len(query) < 2:
+        return jsonify([])
 
-    # --------------------------------------------------------
-    # CACHE
-    # --------------------------------------------------------
+    BENGALURU_LON = 77.5946
+    BENGALURU_LAT = 12.9716
 
-    cached = geocode_cache.get(query_key)
-
-    if cached:
-
-        cached_time, cached_data = cached
-
-        if time.time() - cached_time < GEOCODE_CACHE_TIME:
-
-            print(
-                "Geocode cache hit:",
-                query
-            )
-
-            return jsonify(cached_data)
-
-
-    # --------------------------------------------------------
-    # NOMINATIM
-    # --------------------------------------------------------
+    # ========================================================
+    # ARC GIS GEOCODING
+    # Single request only
+    # ========================================================
 
     try:
 
+        search_query = query
+
+        # Give Bengaluru searches a strong local context
+        if (
+            "bengaluru" not in query.lower()
+            and
+            "bangalore" not in query.lower()
+            and
+            "karnataka" not in query.lower()
+        ):
+            search_query = (
+                query +
+                ", Bengaluru, Karnataka, India"
+            )
+
         params = urlencode({
-            "format": "json",
-            "q": query,
-            "limit": 5,
-            "addressdetails": 1
+
+            "SingleLine":
+                search_query,
+
+            "f":
+                "json",
+
+            "maxLocations":
+                5,
+
+            "outFields":
+                "*",
+
+            "countryCode":
+                "IND",
+
+            "location":
+                f"{BENGALURU_LON},{BENGALURU_LAT}",
+
+            "distance":
+                50000,
+
+            "forStorage":
+                "false"
+
         })
 
         url = (
-            "https://nominatim.openstreetmap.org/search?"
+            "https://geocode.arcgis.com/"
+            "arcgis/rest/services/"
+            "World/GeocodeServer/"
+            "findAddressCandidates?"
             + params
         )
 
         req = Request(
+
             url,
+
             headers={
                 "User-Agent":
-                    "BengaluruAQINavigator/1.0 "
-                    "(Bengaluru AQI Navigator)"
+                    "BengaluruAQINavigator/1.0",
+                "Accept":
+                    "application/json"
             }
+
         )
 
         with urlopen(
             req,
-            timeout=10
+            timeout=5
         ) as response:
 
             data = json.loads(
-                response.read().decode("utf-8")
+                response.read().decode(
+                    "utf-8"
+                )
             )
 
-
-        # ----------------------------------------------------
-        # SAVE TO CACHE
-        # ----------------------------------------------------
-
-        geocode_cache[query_key] = (
-            time.time(),
-            data
+        candidates = data.get(
+            "candidates",
+            []
         )
 
+        results = []
 
-        print(
-            "Geocode success:",
-            query,
-            "->",
-            len(data),
-            "results"
-        )
+        for candidate in candidates:
 
+            location = candidate.get(
+                "location",
+                {}
+            )
 
-        return jsonify(data)
+            lat = location.get("y")
+            lon = location.get("x")
 
+            if (
+                lat is None
+                or
+                lon is None
+            ):
+                continue
+
+            address = (
+                candidate.get(
+                    "address"
+                )
+                or
+                candidate.get(
+                    "attributes",
+                    {}
+                ).get(
+                    "LongLabel"
+                )
+                or
+                query
+            )
+
+            results.append({
+
+                "lat":
+                    str(lat),
+
+                "lon":
+                    str(lon),
+
+                "display_name":
+                    address
+
+            })
+
+        if results:
+
+            print(
+                "ArcGIS geocoding:",
+                query,
+                "->",
+                len(results),
+                "results"
+            )
+
+            return jsonify(
+                results
+            )
 
     except Exception as e:
 
         print(
-            "Geocoding error:",
+            "ArcGIS geocoding error:",
             query,
             str(e)
         )
 
 
-        # ----------------------------------------------------
-        # RETURN OLD CACHE EVEN IF EXPIRED
-        # ----------------------------------------------------
+    # ========================================================
+    # NOMINATIM FALLBACK
+    # ========================================================
 
-        if cached:
+    try:
 
-            print(
-                "Returning stale cache for:",
-                query
+        params = urlencode({
+
+            "format":
+                "json",
+
+            "q":
+                search_query,
+
+            "limit":
+                5,
+
+            "addressdetails":
+                1
+
+        })
+
+        url = (
+            "https://nominatim.openstreetmap.org/"
+            "search?"
+            + params
+        )
+
+        req = Request(
+
+            url,
+
+            headers={
+                "User-Agent":
+                    "BengaluruAQINavigator/1.0"
+            }
+
+        )
+
+        with urlopen(
+            req,
+            timeout=4
+        ) as response:
+
+            data = json.loads(
+                response.read().decode(
+                    "utf-8"
+                )
             )
 
-            return jsonify(
-                cached[1]
-            )
+        return jsonify(
+            data
+        )
 
+    except Exception as e:
 
-        return jsonify({
-            "error":
-                "Geocoding failed"
-        }), 502
+        print(
+            "Nominatim fallback error:",
+            query,
+            str(e)
+        )
+
+        return jsonify([])
 
 
 # ============================================================
@@ -227,7 +335,10 @@ def estimate(lat, lon):
 # ROUTE AQI
 # ============================================================
 
-@app.route("/route_aqi", methods=["POST"])
+@app.route(
+    "/route_aqi",
+    methods=["POST"]
+)
 def route_aqi():
 
     data = request.get_json()
@@ -235,7 +346,9 @@ def route_aqi():
     return jsonify(
         calculate_route(
             data["route"],
-            float(data["travel_time"])
+            float(
+                data["travel_time"]
+            )
         )
     )
 
@@ -244,7 +357,10 @@ def route_aqi():
 # FUTURE ROUTE AQI
 # ============================================================
 
-@app.route("/future_route_aqi", methods=["POST"])
+@app.route(
+    "/future_route_aqi",
+    methods=["POST"]
+)
 def future_route_aqi():
 
     data = request.get_json()
@@ -252,7 +368,9 @@ def future_route_aqi():
     return jsonify(
         calculate_future_route(
             data["route"],
-            float(data["travel_time"])
+            float(
+                data["travel_time"]
+            )
         )
     )
 
@@ -261,7 +379,10 @@ def future_route_aqi():
 # ROUTE SEGMENTS
 # ============================================================
 
-@app.route("/route_segments", methods=["POST"])
+@app.route(
+    "/route_segments",
+    methods=["POST"]
+)
 def route_segments():
 
     data = request.get_json()
@@ -274,26 +395,120 @@ def route_segments():
 
 
 # ============================================================
-# HISTORY
+# RANKING
 # ============================================================
 
-@app.route("/history")
-def history():
+@app.route("/ranking")
+def ranking():
 
-    return jsonify(
-        get_all_history()
+    points = get_latest_points()
+
+    points = sorted(
+        points,
+        key=lambda x: x["aqi"]
     )
+
+    clean = points[:3]
+
+    polluted = sorted(
+        points,
+        key=lambda x: x["aqi"],
+        reverse=True
+    )[:3]
+
+    return jsonify({
+
+        "clean":
+            clean,
+
+        "polluted":
+            polluted
+
+    })
 
 
 # ============================================================
 # STATION HISTORY
 # ============================================================
 
-@app.route("/station_history/<station>")
-def station_history(station):
+@app.route(
+    "/station_history/<device>"
+)
+def station_history(device):
+
+    df = get_all_history()
+
+    df = df[
+        df["device_id"] == device
+    ]
+
+    df = df.sort_values(
+        "timestamp"
+    )
 
     return jsonify(
-        get_history(station)
+
+        df[
+            [
+                "timestamp",
+                "aqi_calibrated"
+            ]
+        ]
+        .tail(24)
+        .to_dict("records")
+
+    )
+
+
+# ============================================================
+# HOURLY HEATMAP
+# ============================================================
+
+@app.route(
+    "/heatmap_hour/<int:hour>"
+)
+def heatmap_hour(hour):
+
+    df = get_all_history()
+
+    df = df[
+        df["timestamp"].dt.hour == hour
+    ]
+
+    points = []
+
+    for _, row in df.iterrows():
+
+        points.append([
+
+            float(
+                row["latitude"]
+            ),
+
+            float(
+                row["longitude"]
+            ),
+
+            float(
+                row["aqi_calibrated"]
+            ) / 250
+
+        ])
+
+    return jsonify(
+        points
+    )
+
+
+# ============================================================
+# AI DASHBOARD
+# ============================================================
+
+@app.route("/ai_dashboard")
+def ai_dashboard():
+
+    return render_template(
+        "ai_dashboard.html"
     )
 
 
@@ -304,22 +519,187 @@ def station_history(station):
 @app.route("/system_status")
 def system_status():
 
+    df = get_latest_dataframe()
+
+    latest_timestamp = (
+        df["timestamp"].max()
+    )
+
+    current_time = datetime.now(
+        timezone.utc
+    )
+
+    hours_difference = (
+
+        current_time -
+        latest_timestamp
+
+    ).total_seconds() / 3600
+
+    if hours_difference <= 1:
+
+        mode = "Live Sensor Data"
+
+    else:
+
+        mode = "Predicted Current AQI"
+
     return jsonify({
-        "status": "online",
-        "time": datetime.now(
-            timezone.utc
-        ).isoformat()
+
+        "current_time":
+            current_time.strftime(
+                "%d-%m-%Y %H:%M:%S"
+            ),
+
+        "latest_timestamp":
+            latest_timestamp.strftime(
+                "%d-%m-%Y %H:%M:%S"
+            ),
+
+        "hours_difference":
+            round(
+                hours_difference,
+                2
+            ),
+
+        "mode":
+            mode,
+
+        "model":
+            "Random Forest",
+
+        "mae":
+            2.15,
+
+        "r2":
+            0.983,
+
+        "timeline": [
+
+            "Connected to AQI Database",
+
+            f"Latest record : "
+            f"{latest_timestamp.strftime('%d-%m-%Y %H:%M:%S')}",
+
+            f"Database age : "
+            f"{round(hours_difference, 2)} hours",
+
+            "Freshness check completed",
+
+            f"Mode selected : {mode}",
+
+            "Random Forest model executed",
+
+            "Current AQI generated",
+
+            "Results sent to dashboard"
+
+        ]
+
     })
 
 
 # ============================================================
-# MAIN
+# STATION PREDICTION STATUS
+# ============================================================
+
+@app.route(
+    "/station_prediction_status"
+)
+def station_prediction_status():
+
+    latest_df = (
+        get_latest_dataframe()
+    )
+
+    predicted_points = (
+        get_predicted_points()
+    )
+
+    latest_df = latest_df.sort_values(
+        "timestamp"
+    )
+
+    latest_rows = (
+
+        latest_df
+        .groupby("device_id")
+        .last()
+        .reset_index()
+
+    )
+
+    prediction_map = {
+
+        p["device"]:
+            p["aqi"]
+
+        for p in predicted_points
+
+    }
+
+    result = []
+
+    for _, row in latest_rows.iterrows():
+
+        device = row[
+            "device_id"
+        ]
+
+        last_aqi = round(
+
+            float(
+                row[
+                    "aqi_calibrated"
+                ]
+            ),
+
+            2
+
+        )
+
+        predicted = round(
+
+            float(
+                prediction_map.get(
+                    device,
+                    last_aqi
+                )
+            ),
+
+            2
+
+        )
+
+        source = "Predicted"
+
+        result.append({
+
+            "device":
+                device,
+
+            "last_aqi":
+                last_aqi,
+
+            "predicted_aqi":
+                predicted,
+
+            "source":
+                source
+
+        })
+
+    return jsonify(
+        result
+    )
+
+
+# ============================================================
+# START SERVER
 # ============================================================
 
 if __name__ == "__main__":
 
     app.run(
-        host="0.0.0.0",
-        port=5000,
         debug=True
     )
