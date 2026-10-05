@@ -1,21 +1,26 @@
 from flask import Flask, render_template, jsonify, request
+
 from services.prediction import get_predicted_points
+
 from services.api_service import (
     get_latest_points,
     get_latest_dataframe,
     get_all_history,
     get_history
 )
+
 from services.interpolation import (
     generate_heatmap,
     generate_future_heatmap,
     idw
 )
+
 from services.routing import (
     calculate_route,
     calculate_future_route,
     calculate_route_segments
 )
+
 from services.estimate import estimate_aqi
 
 import json
@@ -29,12 +34,430 @@ app = Flask(__name__)
 
 
 # ============================================================
-# HOME
+# LOCAL BENGALURU SEARCH DATABASE
 # ============================================================
 
-@app.route("/")
-def home():
-    return render_template("index.html")
+LOCAL_PLACES = [
+
+    {
+        "name": "RNS Institute of Technology",
+        "aliases": [
+            "rns",
+            "rnsit",
+            "rns institute",
+            "rns institute of technology",
+            "rnsit bangalore"
+        ],
+        "lat": 12.9078,
+        "lon": 77.5183
+    },
+
+    {
+        "name": "RV College of Engineering",
+        "aliases": [
+            "rvc",
+            "rvce",
+            "rv college",
+            "rv college of engineering",
+            "rv engineering college"
+        ],
+        "lat": 12.9237,
+        "lon": 77.4987
+    },
+
+    {
+        "name": "PES University",
+        "aliases": [
+            "pes",
+            "pes university",
+            "pes university ring road",
+            "pesit"
+        ],
+        "lat": 12.9346,
+        "lon": 77.5347
+    },
+
+    {
+        "name": "Indian Institute of Science",
+        "aliases": [
+            "iisc",
+            "iisc bangalore",
+            "indian institute of science"
+        ],
+        "lat": 13.0219,
+        "lon": 77.5671
+    },
+
+    {
+        "name": "BMS College of Engineering",
+        "aliases": [
+            "bms",
+            "bmsce",
+            "bms college",
+            "bms college of engineering"
+        ],
+        "lat": 12.9416,
+        "lon": 77.5656
+    },
+
+    {
+        "name": "Bangalore Institute of Technology",
+        "aliases": [
+            "bit",
+            "bit bangalore",
+            "bangalore institute of technology"
+        ],
+        "lat": 12.9560,
+        "lon": 77.5747
+    },
+
+    {
+        "name": "R.V. Institute of Technology and Management",
+        "aliases": [
+            "rvitm",
+            "rv institute of technology",
+            "rvitm bangalore"
+        ],
+        "lat": 12.8975,
+        "lon": 77.5106
+    },
+
+    {
+        "name": "Kempegowda International Airport",
+        "aliases": [
+            "kempegowda airport",
+            "blr airport",
+            "bangalore airport",
+            "bengaluru airport",
+            "airport"
+        ],
+        "lat": 13.1986,
+        "lon": 77.7066
+    },
+
+    {
+        "name": "Bangalore Palace",
+        "aliases": [
+            "bangalore palace",
+            "bengaluru palace"
+        ],
+        "lat": 12.9987,
+        "lon": 77.5920
+    },
+
+    {
+        "name": "Cubbon Park",
+        "aliases": [
+            "cubbon",
+            "cubbon park"
+        ],
+        "lat": 12.9763,
+        "lon": 77.5929
+    },
+
+    {
+        "name": "Lalbagh Botanical Garden",
+        "aliases": [
+            "lalbagh",
+            "lal bagh",
+            "lalbagh botanical garden"
+        ],
+        "lat": 12.9507,
+        "lon": 77.5848
+    },
+
+    {
+        "name": "Vidhana Soudha",
+        "aliases": [
+            "vidhana soudha",
+            "vidhan soudha"
+        ],
+        "lat": 12.9797,
+        "lon": 77.5908
+    },
+
+    {
+        "name": "Majestic",
+        "aliases": [
+            "majestic",
+            "kempegowda bus station",
+            "kempegowda bus stand"
+        ],
+        "lat": 12.9767,
+        "lon": 77.5713
+    },
+
+    {
+        "name": "Electronic City",
+        "aliases": [
+            "electronic city",
+            "electronic city bangalore"
+        ],
+        "lat": 12.8452,
+        "lon": 77.6602
+    },
+
+    {
+        "name": "Whitefield",
+        "aliases": [
+            "whitefield",
+            "whitefield bangalore"
+        ],
+        "lat": 12.9698,
+        "lon": 77.7500
+    },
+
+    {
+        "name": "Koramangala",
+        "aliases": [
+            "koramangala",
+            "koramangala bangalore"
+        ],
+        "lat": 12.9352,
+        "lon": 77.6245
+    },
+
+    {
+        "name": "Indiranagar",
+        "aliases": [
+            "indiranagar",
+            "indiranagar bangalore"
+        ],
+        "lat": 12.9784,
+        "lon": 77.6408
+    },
+
+    {
+        "name": "MG Road",
+        "aliases": [
+            "mg road",
+            "mg road bangalore",
+            "mahatma gandhi road"
+        ],
+        "lat": 12.9756,
+        "lon": 77.6060
+    },
+
+    {
+        "name": "Yeshwanthpur",
+        "aliases": [
+            "yeshwanthpur",
+            "yeshwanthpur bangalore"
+        ],
+        "lat": 13.0280,
+        "lon": 77.5407
+    },
+
+    {
+        "name": "Jayanagar",
+        "aliases": [
+            "jayanagar",
+            "jayanagar bangalore"
+        ],
+        "lat": 12.9250,
+        "lon": 77.5938
+    },
+
+    {
+        "name": "Banashankari",
+        "aliases": [
+            "banashankari",
+            "banashankari bangalore"
+        ],
+        "lat": 12.9255,
+        "lon": 77.5468
+    },
+
+    {
+        "name": "Marathahalli",
+        "aliases": [
+            "marathahalli",
+            "marathahalli bangalore"
+        ],
+        "lat": 12.9591,
+        "lon": 77.6974
+    },
+
+    {
+        "name": "Hebbal",
+        "aliases": [
+            "hebbal",
+            "hebbal bangalore"
+        ],
+        "lat": 13.0358,
+        "lon": 77.5970
+    },
+
+    {
+        "name": "BTM Layout",
+        "aliases": [
+            "btm",
+            "btm layout",
+            "btm layout bangalore"
+        ],
+        "lat": 12.9166,
+        "lon": 77.6101
+    },
+
+    {
+        "name": "HSR Layout",
+        "aliases": [
+            "hsr",
+            "hsr layout",
+            "hsr layout bangalore"
+        ],
+        "lat": 12.9116,
+        "lon": 77.6389
+    },
+
+    {
+        "name": "Rajajinagar",
+        "aliases": [
+            "rajajinagar",
+            "rajajinagar bangalore"
+        ],
+        "lat": 12.9910,
+        "lon": 77.5530
+    },
+
+    {
+        "name": "Bangalore University",
+        "aliases": [
+            "bangalore university",
+            "bengaluru university"
+        ],
+        "lat": 12.9416,
+        "lon": 77.5013
+    }
+]
+
+
+# ============================================================
+# HELPER: LOCAL SEARCH
+# ============================================================
+
+def local_search(query):
+
+    query = query.strip().lower()
+
+    if not query:
+        return []
+
+    results = []
+
+    for place in LOCAL_PLACES:
+
+        name = place["name"].lower()
+
+        aliases = [
+            alias.lower()
+            for alias in place["aliases"]
+        ]
+
+        score = 0
+
+        if query == name:
+            score = 100
+
+        elif query in aliases:
+            score = 95
+
+        elif name.startswith(query):
+            score = 90
+
+        elif any(alias.startswith(query) for alias in aliases):
+            score = 85
+
+        elif query in name:
+            score = 75
+
+        elif any(query in alias for alias in aliases):
+            score = 70
+
+        if score > 0:
+
+            results.append({
+                "display_name": place["name"] + ", Bengaluru, Karnataka, India",
+                "lat": place["lat"],
+                "lon": place["lon"],
+                "source": "local",
+                "_score": score
+            })
+
+    results.sort(
+        key=lambda x: x["_score"],
+        reverse=True
+    )
+
+    for result in results:
+        result.pop("_score", None)
+
+    return results[:5]
+
+
+# ============================================================
+# HELPER: ARC GIS SEARCH
+# ============================================================
+
+def arcgis_search(query, limit=5):
+
+    params = urlencode({
+        "SingleLine": query,
+        "f": "json",
+        "maxLocations": limit,
+        "outFields": "*",
+        "countryCode": "IND",
+
+        # Bengaluru search area
+        "searchExtent": "77.30,12.75,77.90,13.25",
+
+        # Bengaluru center
+        "location": "77.5946,12.9716"
+    })
+
+    url = (
+        "https://geocode.arcgis.com/"
+        "arcgis/rest/services/World/GeocodeServer/"
+        "findAddressCandidates?"
+        + params
+    )
+
+    req = Request(
+        url,
+        headers={
+            "User-Agent": "BengaluruAQINavigator/1.0"
+        }
+    )
+
+    with urlopen(req, timeout=6) as response:
+
+        data = json.loads(
+            response.read().decode("utf-8")
+        )
+
+    results = []
+
+    for candidate in data.get("candidates", []):
+
+        location = candidate.get("location", {})
+
+        lat = location.get("y")
+        lon = location.get("x")
+
+        if lat is None or lon is None:
+            continue
+
+        results.append({
+            "display_name": candidate.get(
+                "address",
+                query
+            ),
+            "lat": lat,
+            "lon": lon,
+            "source": "arcgis"
+        })
+
+    return results[:limit]
 
 
 # ============================================================
@@ -49,103 +472,50 @@ def autocomplete():
         ""
     ).strip()
 
-    if len(query) < 3:
+    if len(query) < 2:
         return jsonify([])
 
     try:
 
-        params = urlencode({
+        # First use our instant local database.
+        local_results = local_search(query)
 
-            "text":
-                query,
-
-            "location":
-                "77.5946,12.9716",
-
-            "searchExtent":
-                "77.30,12.75,77.90,13.25",
-
-            "countryCode":
-                "IND",
-
-            "maxSuggestions":
-                5,
-
-            "returnCollections":
-                "false",
-
-            "f":
-                "json"
-
-        })
-
-        url = (
-            "https://geocode.arcgis.com/"
-            "arcgis/rest/services/"
-            "World/GeocodeServer/"
-            "suggest?"
-            + params
-        )
-
-        req = Request(
-
-            url,
-
-            headers={
-                "User-Agent":
-                    "BengaluruAQINavigator/1.0",
-                "Accept":
-                    "application/json"
-            }
-
-        )
-
-        with urlopen(
-            req,
-            timeout=5
-        ) as response:
-
-            data = json.loads(
-                response.read().decode(
-                    "utf-8"
-                )
-            )
-
-        suggestions = data.get(
-            "suggestions",
-            []
+        # Then use ArcGIS for general locations.
+        arcgis_results = arcgis_search(
+            query,
+            5
         )
 
         results = []
 
-        for suggestion in suggestions:
+        # Local results always come first.
+        results.extend(local_results)
 
-            text = suggestion.get(
-                "text",
-                ""
+        # Add ArcGIS results without duplicates.
+        existing = {
+            (
+                round(float(x["lat"]), 5),
+                round(float(x["lon"]), 5)
+            )
+            for x in local_results
+        }
+
+        for result in arcgis_results:
+
+            key = (
+                round(float(result["lat"]), 5),
+                round(float(result["lon"]), 5)
             )
 
-            magic_key = suggestion.get(
-                "magicKey",
-                ""
-            )
+            if key not in existing:
 
-            if not text:
-                continue
+                results.append(result)
+                existing.add(key)
 
-            results.append({
+            if len(results) >= 5:
+                break
 
-                "display_name":
-                    text,
-
-                "magicKey":
-                    magic_key
-
-            })
-
-        return jsonify(
-            results
-        )
+        return jsonify(results[:5])
 
     except Exception as e:
 
@@ -154,11 +524,19 @@ def autocomplete():
             e
         )
 
+        # Even if ArcGIS fails, local results
+        # should still work.
+        local_results = local_search(query)
+
+        if local_results:
+            return jsonify(local_results)
+
         return jsonify([])
 
 
 # ============================================================
-# GEOCODING
+# GEOCODE
+# Used by routing.js
 # ============================================================
 
 @app.route("/geocode")
@@ -174,126 +552,19 @@ def geocode():
 
     try:
 
-        params = urlencode({
+        # Local places first.
+        local_results = local_search(query)
 
-            "SingleLine":
-                query,
+        if local_results:
+            return jsonify(local_results)
 
-            "location":
-                "77.5946,12.9716",
-
-            "searchExtent":
-                "77.30,12.75,77.90,13.25",
-
-            "countryCode":
-                "IND",
-
-            "maxLocations":
-                5,
-
-            "outFields":
-                "*",
-
-            "forStorage":
-                "false",
-
-            "f":
-                "json"
-
-        })
-
-        url = (
-            "https://geocode.arcgis.com/"
-            "arcgis/rest/services/"
-            "World/GeocodeServer/"
-            "findAddressCandidates?"
-            + params
+        # General ArcGIS geocoding.
+        results = arcgis_search(
+            query,
+            5
         )
 
-        req = Request(
-
-            url,
-
-            headers={
-                "User-Agent":
-                    "BengaluruAQINavigator/1.0",
-                "Accept":
-                    "application/json"
-            }
-
-        )
-
-        with urlopen(
-            req,
-            timeout=5
-        ) as response:
-
-            data = json.loads(
-                response.read().decode(
-                    "utf-8"
-                )
-            )
-
-        candidates = data.get(
-            "candidates",
-            []
-        )
-
-        results = []
-
-        for candidate in candidates:
-
-            location = candidate.get(
-                "location",
-                {}
-            )
-
-            lat = location.get(
-                "y"
-            )
-
-            lon = location.get(
-                "x"
-            )
-
-            if (
-                lat is None
-                or
-                lon is None
-            ):
-                continue
-
-            address = (
-                candidate.get(
-                    "address"
-                )
-                or
-                candidate.get(
-                    "attributes",
-                    {}
-                ).get(
-                    "LongLabel"
-                )
-                or
-                query
-            )
-
-            results.append({
-
-                "lat":
-                    str(lat),
-
-                "lon":
-                    str(lon),
-
-                "display_name":
-                    address
-
-            })
-
-        return jsonify(
-            results
-        )
+        return jsonify(results)
 
     except Exception as e:
 
@@ -302,159 +573,21 @@ def geocode():
             e
         )
 
-        return jsonify([])
+        return jsonify({
+            "error": "Geocoding failed"
+        }), 502
 
 
 # ============================================================
-# RESOLVE SELECTED AUTOCOMPLETE RESULT
+# HOME
 # ============================================================
 
-@app.route("/geocode_resolve")
-def geocode_resolve():
+@app.route("/")
+def index():
 
-    query = request.args.get(
-        "q",
-        ""
-    ).strip()
-
-    magic_key = request.args.get(
-        "magicKey",
-        ""
-    ).strip()
-
-    if not query:
-        return jsonify([])
-
-    try:
-
-        params = {
-
-            "SingleLine":
-                query,
-
-            "location":
-                "77.5946,12.9716",
-
-            "searchExtent":
-                "77.30,12.75,77.90,13.25",
-
-            "countryCode":
-                "IND",
-
-            "maxLocations":
-                1,
-
-            "outFields":
-                "*",
-
-            "forStorage":
-                "false",
-
-            "f":
-                "json"
-
-        }
-
-        if magic_key:
-
-            params["magicKey"] = (
-                magic_key
-            )
-
-        url = (
-            "https://geocode.arcgis.com/"
-            "arcgis/rest/services/"
-            "World/GeocodeServer/"
-            "findAddressCandidates?"
-            + urlencode(params)
-        )
-
-        req = Request(
-
-            url,
-
-            headers={
-                "User-Agent":
-                    "BengaluruAQINavigator/1.0",
-                "Accept":
-                    "application/json"
-            }
-
-        )
-
-        with urlopen(
-            req,
-            timeout=5
-        ) as response:
-
-            data = json.loads(
-                response.read().decode(
-                    "utf-8"
-                )
-            )
-
-        candidates = data.get(
-            "candidates",
-            []
-        )
-
-        results = []
-
-        for candidate in candidates:
-
-            location = candidate.get(
-                "location",
-                {}
-            )
-
-            lat = location.get(
-                "y"
-            )
-
-            lon = location.get(
-                "x"
-            )
-
-            if (
-                lat is None
-                or
-                lon is None
-            ):
-                continue
-
-            address = (
-                candidate.get(
-                    "address"
-                )
-                or
-                query
-            )
-
-            results.append({
-
-                "lat":
-                    str(lat),
-
-                "lon":
-                    str(lon),
-
-                "display_name":
-                    address
-
-            })
-
-        return jsonify(
-            results
-        )
-
-    except Exception as e:
-
-        print(
-            "Geocode resolve error:",
-            e
-        )
-
-        return jsonify([])
+    return render_template(
+        "index.html"
+    )
 
 
 # ============================================================
@@ -494,18 +627,46 @@ def heatmap():
 
 
 # ============================================================
-# AQI ESTIMATION
+# FUTURE HEATMAP
+# ============================================================
+
+@app.route("/future_heatmap")
+def future_heatmap():
+
+    return jsonify(
+        generate_future_heatmap()
+    )
+
+
+# ============================================================
+# ESTIMATE AQI
 # ============================================================
 
 @app.route("/estimate/<lat>/<lon>")
 def estimate(lat, lon):
 
-    return jsonify(
-        estimate_aqi(
-            float(lat),
-            float(lon)
+    try:
+
+        lat = float(lat)
+        lon = float(lon)
+
+        return jsonify(
+            estimate_aqi(
+                lat,
+                lon
+            )
         )
-    )
+
+    except Exception as e:
+
+        print(
+            "Estimate error:",
+            e
+        )
+
+        return jsonify({
+            "error": str(e)
+        }), 500
 
 
 # ============================================================
@@ -521,12 +682,7 @@ def route_aqi():
     data = request.get_json()
 
     return jsonify(
-        calculate_route(
-            data["route"],
-            float(
-                data["travel_time"]
-            )
-        )
+        calculate_route(data)
     )
 
 
@@ -543,12 +699,7 @@ def future_route_aqi():
     data = request.get_json()
 
     return jsonify(
-        calculate_future_route(
-            data["route"],
-            float(
-                data["travel_time"]
-            )
-        )
+        calculate_future_route(data)
     )
 
 
@@ -565,9 +716,7 @@ def route_segments():
     data = request.get_json()
 
     return jsonify(
-        calculate_route_segments(
-            data["route"]
-        )
+        calculate_route_segments(data)
     )
 
 
@@ -578,30 +727,44 @@ def route_segments():
 @app.route("/ranking")
 def ranking():
 
-    points = get_latest_points()
+    try:
 
-    points = sorted(
-        points,
-        key=lambda x: x["aqi"]
-    )
+        points = get_latest_points()
 
-    clean = points[:3]
+        points = sorted(
+            points,
+            key=lambda x: x.get(
+                "aqi",
+                999
+            )
+        )
 
-    polluted = sorted(
-        points,
-        key=lambda x: x["aqi"],
-        reverse=True
-    )[:3]
+        cleanest = points[:3]
 
-    return jsonify({
+        polluted = sorted(
+            points,
+            key=lambda x: x.get(
+                "aqi",
+                0
+            ),
+            reverse=True
+        )[:3]
 
-        "clean":
-            clean,
+        return jsonify({
+            "cleanest": cleanest,
+            "polluted": polluted
+        })
 
-        "polluted":
-            polluted
+    except Exception as e:
 
-    })
+        print(
+            "Ranking error:",
+            e
+        )
+
+        return jsonify({
+            "error": str(e)
+        }), 500
 
 
 # ============================================================
@@ -613,32 +776,43 @@ def ranking():
 )
 def station_history(device):
 
-    df = get_latest_dataframe()
+    try:
 
-    df = df[
-        df["device_id"] == device
-    ]
+        df = get_latest_dataframe()
 
-    df = df.sort_values(
-        "timestamp"
-    )
-
-    return jsonify(
-
-        df[
-            [
-                "timestamp",
-                "aqi_calibrated"
-            ]
+        df = df[
+            df["device_id"] == device
         ]
-        .tail(24)
-        .to_dict("records")
 
-    )
+        df = df.sort_values(
+            "timestamp"
+        )
+
+        return jsonify(
+            df[
+                [
+                    "timestamp",
+                    "aqi_calibrated"
+                ]
+            ]
+            .tail(24)
+            .to_dict("records")
+        )
+
+    except Exception as e:
+
+        print(
+            "Station history error:",
+            e
+        )
+
+        return jsonify({
+            "error": str(e)
+        }), 500
 
 
 # ============================================================
-# HOURLY HEATMAP
+# HEATMAP BY HOUR
 # ============================================================
 
 @app.route(
@@ -646,35 +820,35 @@ def station_history(device):
 )
 def heatmap_hour(hour):
 
-    df = get_all_history()
+    try:
 
-    df = df[
-        df["timestamp"].dt.hour == hour
-    ]
+        df = get_all_history()
 
-    points = []
+        df["timestamp"] = (
+            __import__("pandas")
+            .to_datetime(
+                df["timestamp"]
+            )
+        )
 
-    for _, row in df.iterrows():
+        filtered = df[
+            df["timestamp"].dt.hour == hour
+        ]
 
-        points.append([
+        return jsonify(
+            filtered.to_dict("records")
+        )
 
-            float(
-                row["latitude"]
-            ),
+    except Exception as e:
 
-            float(
-                row["longitude"]
-            ),
+        print(
+            "Heatmap hour error:",
+            e
+        )
 
-            float(
-                row["aqi_calibrated"]
-            ) / 250
-
-        ])
-
-    return jsonify(
-        points
-    )
+        return jsonify({
+            "error": str(e)
+        }), 500
 
 
 # ============================================================
@@ -684,9 +858,9 @@ def heatmap_hour(hour):
 @app.route("/ai_dashboard")
 def ai_dashboard():
 
-    return render_template(
-        "ai_dashboard.html"
-    )
+    return jsonify({
+        "status": "ok"
+    })
 
 
 # ============================================================
@@ -696,83 +870,11 @@ def ai_dashboard():
 @app.route("/system_status")
 def system_status():
 
-    df = get_latest_dataframe()
-
-    latest_timestamp = (
-        df["timestamp"].max()
-    )
-
-    current_time = datetime.now(
-        timezone.utc
-    )
-
-    hours_difference = (
-
-        current_time -
-        latest_timestamp
-
-    ).total_seconds() / 3600
-
-    if hours_difference <= 1:
-
-        mode = "Live Sensor Data"
-
-    else:
-
-        mode = "Predicted Current AQI"
-
     return jsonify({
-
-        "current_time":
-            current_time.strftime(
-                "%d-%m-%Y %H:%M:%S"
-            ),
-
-        "latest_timestamp":
-            latest_timestamp.strftime(
-                "%d-%m-%Y %H:%M:%S"
-            ),
-
-        "hours_difference":
-            round(
-                hours_difference,
-                2
-            ),
-
-        "mode":
-            mode,
-
-        "model":
-            "Random Forest",
-
-        "mae":
-            2.15,
-
-        "r2":
-            0.983,
-
-        "timeline": [
-
-            "Connected to AQI Database",
-
-            f"Latest record : "
-            f"{latest_timestamp.strftime('%d-%m-%Y %H:%M:%S')}",
-
-            f"Database age : "
-            f"{round(hours_difference, 2)} hours",
-
-            "Freshness check completed",
-
-            f"Mode selected : {mode}",
-
-            "Random Forest model executed",
-
-            "Current AQI generated",
-
-            "Results sent to dashboard"
-
-        ]
-
+        "status": "online",
+        "timestamp": datetime.now(
+            timezone.utc
+        ).isoformat()
     })
 
 
@@ -785,94 +887,30 @@ def system_status():
 )
 def station_prediction_status():
 
-    latest_df = (
-        get_latest_dataframe()
-    )
+    try:
 
-    predicted_points = (
-        get_predicted_points()
-    )
+        points = get_predicted_points()
 
-    latest_df = latest_df.sort_values(
-        "timestamp"
-    )
-
-    latest_rows = (
-
-        latest_df
-        .groupby("device_id")
-        .last()
-        .reset_index()
-
-    )
-
-    prediction_map = {
-
-        p["device"]:
-            p["aqi"]
-
-        for p in predicted_points
-
-    }
-
-    result = []
-
-    for _, row in latest_rows.iterrows():
-
-        device = row[
-            "device_id"
-        ]
-
-        last_aqi = round(
-
-            float(
-                row[
-                    "aqi_calibrated"
-                ]
-            ),
-
-            2
-
-        )
-
-        predicted = round(
-
-            float(
-                prediction_map.get(
-                    device,
-                    last_aqi
-                )
-            ),
-
-            2
-
-        )
-
-        source = "Predicted"
-
-        result.append({
-
-            "device":
-                device,
-
-            "last_aqi":
-                last_aqi,
-
-            "predicted_aqi":
-                predicted,
-
-            "source":
-                source
-
+        return jsonify({
+            "status": "ok",
+            "count": len(points)
         })
 
-    return jsonify(
-        result
-    )
+    except Exception as e:
+
+        print(
+            "Prediction status error:",
+            e
+        )
+
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
 
 
 # ============================================================
-# START SERVER
+# RUN
 # ============================================================
 
 if __name__ == "__main__":
