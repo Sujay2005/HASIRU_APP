@@ -49,6 +49,127 @@ def geocode():
     if not query:
         return jsonify([])
 
+    # --------------------------------------------------------
+    # PRIMARY GEOCODER: PHOTON
+    # --------------------------------------------------------
+
+    try:
+
+        params = urlencode({
+            "q": query,
+            "limit": 5
+        })
+
+        url = (
+            "https://photon.komoot.io/api/?"
+            + params
+        )
+
+        req = Request(
+            url,
+            headers={
+                "User-Agent":
+                    "HASIRU-AQI-Navigator/1.0",
+                "Accept":
+                    "application/json"
+            }
+        )
+
+        with urlopen(
+            req,
+            timeout=10
+        ) as response:
+
+            data = json.loads(
+                response.read().decode(
+                    "utf-8"
+                )
+            )
+
+        results = []
+
+        for feature in data.get(
+            "features",
+            []
+        ):
+
+            geometry = feature.get(
+                "geometry",
+                {}
+            )
+
+            coordinates = geometry.get(
+                "coordinates",
+                []
+            )
+
+            properties = feature.get(
+                "properties",
+                {}
+            )
+
+            if len(coordinates) < 2:
+                continue
+
+            lon = coordinates[0]
+            lat = coordinates[1]
+
+            name_parts = []
+
+            for key in [
+                "name",
+                "street",
+                "district",
+                "city",
+                "state",
+                "country"
+            ]:
+
+                value = properties.get(key)
+
+                if (
+                    value
+                    and value not in name_parts
+                ):
+
+                    name_parts.append(
+                        str(value)
+                    )
+
+            display_name = ", ".join(
+                name_parts
+            )
+
+            results.append({
+
+                "lat": str(lat),
+
+                "lon": str(lon),
+
+                "display_name":
+                    display_name
+
+            })
+
+        # If Photon returned valid results,
+        # return them immediately.
+
+        if results:
+
+            return jsonify(results)
+
+    except Exception as e:
+
+        print(
+            "Photon geocoding failed:",
+            e
+        )
+
+
+    # --------------------------------------------------------
+    # FALLBACK GEOCODER: NOMINATIM
+    # --------------------------------------------------------
+
     try:
 
         params = urlencode({
@@ -58,29 +179,46 @@ def geocode():
             "addressdetails": 1
         })
 
-        url = "https://nominatim.openstreetmap.org/search?" + params
+        url = (
+            "https://nominatim.openstreetmap.org/search?"
+            + params
+        )
 
         req = Request(
             url,
             headers={
-                "User-Agent": "BengaluruAQINavigator/1.0"
+                "User-Agent":
+                    "HASIRU-AQI-Navigator/1.0",
+                "Accept":
+                    "application/json",
+                "Accept-Language":
+                    "en"
             }
         )
 
-        with urlopen(req, timeout=10) as response:
+        with urlopen(
+            req,
+            timeout=10
+        ) as response:
 
             data = json.loads(
-                response.read().decode("utf-8")
+                response.read().decode(
+                    "utf-8"
+                )
             )
 
         return jsonify(data)
 
     except Exception as e:
 
-        print("Geocoding error:", e)
+        print(
+            "Nominatim geocoding failed:",
+            e
+        )
 
         return jsonify({
-            "error": "Geocoding failed"
+            "error":
+                "Geocoding service unavailable"
         }), 502
 
 
@@ -139,7 +277,10 @@ def estimate(lat, lon):
 # ROUTE AQI
 # ============================================================
 
-@app.route("/route_aqi", methods=["POST"])
+@app.route(
+    "/route_aqi",
+    methods=["POST"]
+)
 def route_aqi():
 
     data = request.get_json()
@@ -147,7 +288,9 @@ def route_aqi():
     return jsonify(
         calculate_route(
             data["route"],
-            float(data["travel_time"])
+            float(
+                data["travel_time"]
+            )
         )
     )
 
@@ -156,7 +299,10 @@ def route_aqi():
 # FUTURE ROUTE AQI
 # ============================================================
 
-@app.route("/future_route_aqi", methods=["POST"])
+@app.route(
+    "/future_route_aqi",
+    methods=["POST"]
+)
 def future_route_aqi():
 
     data = request.get_json()
@@ -164,7 +310,9 @@ def future_route_aqi():
     return jsonify(
         calculate_future_route(
             data["route"],
-            float(data["travel_time"])
+            float(
+                data["travel_time"]
+            )
         )
     )
 
@@ -173,7 +321,10 @@ def future_route_aqi():
 # ROUTE SEGMENTS
 # ============================================================
 
-@app.route("/route_segments", methods=["POST"])
+@app.route(
+    "/route_segments",
+    methods=["POST"]
+)
 def route_segments():
 
     data = request.get_json()
@@ -220,7 +371,9 @@ def ranking():
 # STATION HISTORY
 # ============================================================
 
-@app.route("/station_history/<device>")
+@app.route(
+    "/station_history/<device>"
+)
 def station_history(device):
 
     df = get_all_history()
@@ -251,7 +404,9 @@ def station_history(device):
 # HOURLY HEATMAP
 # ============================================================
 
-@app.route("/heatmap_hour/<int:hour>")
+@app.route(
+    "/heatmap_hour/<int:hour>"
+)
 def heatmap_hour(hour):
 
     df = get_all_history()
@@ -266,9 +421,13 @@ def heatmap_hour(hour):
 
         points.append([
 
-            float(row["latitude"]),
+            float(
+                row["latitude"]
+            ),
 
-            float(row["longitude"]),
+            float(
+                row["longitude"]
+            ),
 
             float(
                 row["aqi_calibrated"]
@@ -300,7 +459,9 @@ def system_status():
 
     df = get_latest_dataframe()
 
-    latest_timestamp = df["timestamp"].max()
+    latest_timestamp = df[
+        "timestamp"
+    ].max()
 
     current_time = datetime.now(
         timezone.utc
@@ -308,8 +469,8 @@ def system_status():
 
     hours_difference = (
 
-        current_time -
-        latest_timestamp
+        current_time
+        - latest_timestamp
 
     ).total_seconds() / 3600
 
@@ -380,7 +541,9 @@ def system_status():
 # STATION PREDICTION STATUS
 # ============================================================
 
-@app.route("/station_prediction_status")
+@app.route(
+    "/station_prediction_status"
+)
 def station_prediction_status():
 
     latest_df = get_latest_dataframe()
@@ -413,10 +576,13 @@ def station_prediction_status():
         device = row["device_id"]
 
         last_aqi = round(
+
             float(
                 row["aqi_calibrated"]
             ),
+
             2
+
         )
 
         predicted = round(
