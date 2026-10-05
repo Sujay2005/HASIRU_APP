@@ -1,3 +1,5 @@
+# app.py
+
 from flask import Flask, render_template, jsonify, request
 
 from services.prediction import get_predicted_points
@@ -50,8 +52,8 @@ LOCAL_PLACES = [
             "rns institute of technology",
             "rnsit bangalore"
         ],
-        "lat": 12.9078,
-        "lon": 77.5183
+        "lat": 12.900733,
+        "lon": 77.518175
     },
 
     {
@@ -606,7 +608,6 @@ def autocomplete():
 
 # ============================================================
 # GEOCODE
-# Used by routing.js
 # ============================================================
 
 @app.route("/geocode")
@@ -891,16 +892,12 @@ def ranking():
 
                 continue
 
-
-        # Lowest AQI first
         clean = sorted(
             valid_points,
             key=lambda x:
                 x["aqi"]
         )[:3]
 
-
-        # Highest AQI first
         polluted = sorted(
             valid_points,
             key=lambda x:
@@ -908,9 +905,6 @@ def ranking():
             reverse=True
         )[:3]
 
-
-        # IMPORTANT:
-        # Frontend expects "clean".
         return jsonify({
 
             "clean":
@@ -919,7 +913,6 @@ def ranking():
             "polluted":
                 polluted
         })
-
 
     except Exception as e:
 
@@ -950,11 +943,6 @@ def station_history(device):
             device
         )
 
-
-        # ----------------------------------------------------
-        # FIRST: use the actual historical data
-        # ----------------------------------------------------
-
         try:
 
             df = get_all_history()
@@ -975,7 +963,6 @@ def station_history(device):
                         df["device_id"].astype(str)
                         == str(device)
                     ]
-
 
                 if not df.empty:
 
@@ -998,9 +985,6 @@ def station_history(device):
                             "timestamp"
                         )
 
-
-                    # Return the history needed
-                    # by the Trends page.
                     if (
                         "aqi_calibrated"
                         in df.columns
@@ -1061,11 +1045,6 @@ def station_history(device):
                 history_error
             )
 
-
-        # ----------------------------------------------------
-        # SECOND FALLBACK: get_history(device)
-        # ----------------------------------------------------
-
         try:
 
             history = get_history(
@@ -1096,7 +1075,6 @@ def station_history(device):
                                 "timestamp"
                             )
 
-
                         if (
                             "aqi_calibrated"
                             in df.columns
@@ -1121,7 +1099,6 @@ def station_history(device):
                                 )
                             )
 
-
                 elif isinstance(
                     history,
                     list
@@ -1138,11 +1115,6 @@ def station_history(device):
                 history_error
             )
 
-
-        # ----------------------------------------------------
-        # FINAL FALLBACK: latest dataframe
-        # ----------------------------------------------------
-
         print(
             "Using latest dataframe fallback"
         )
@@ -1153,22 +1125,18 @@ def station_history(device):
 
             return jsonify([])
 
-
         df = df[
             df["device_id"].astype(str)
             == str(device)
         ]
 
-
         if df.empty:
 
             return jsonify([])
 
-
         df = df.sort_values(
             "timestamp"
         )
-
 
         result = df[
             [
@@ -1177,19 +1145,16 @@ def station_history(device):
             ]
         ].tail(24)
 
-
         result["timestamp"] = (
             result["timestamp"]
             .astype(str)
         )
-
 
         return jsonify(
             result.to_dict(
                 "records"
             )
         )
-
 
     except Exception as e:
 
