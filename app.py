@@ -50,8 +50,8 @@ LOCAL_PLACES = [
             "rns institute of technology",
             "rnsit bangalore"
         ],
-        "lat": 12.900733,
-        "lon": 77.518175
+        "lat": 12.9078,
+        "lon": 77.5183
     },
 
     {
@@ -755,11 +755,37 @@ def estimate(lat, lon):
 )
 def route_aqi():
 
-    data = request.get_json()
+    try:
 
-    return jsonify(
-        calculate_route(data)
-    )
+        data = request.get_json()
+
+        route = data["route"]
+
+        travel_time = float(
+            data["travel_time"]
+        )
+
+        return jsonify(
+            calculate_route(
+                route,
+                travel_time
+            )
+        )
+
+    except Exception as e:
+
+        print(
+            "Route AQI error:",
+            e
+        )
+
+        return jsonify({
+            "average_aqi": 0,
+            "max_aqi": 0,
+            "exposure_score": 0,
+            "category": "Unknown",
+            "error": str(e)
+        }), 500
 
 
 # ============================================================
@@ -772,11 +798,37 @@ def route_aqi():
 )
 def future_route_aqi():
 
-    data = request.get_json()
+    try:
 
-    return jsonify(
-        calculate_future_route(data)
-    )
+        data = request.get_json()
+
+        route = data["route"]
+
+        travel_time = float(
+            data["travel_time"]
+        )
+
+        return jsonify(
+            calculate_future_route(
+                route,
+                travel_time
+            )
+        )
+
+    except Exception as e:
+
+        print(
+            "Future route AQI error:",
+            e
+        )
+
+        return jsonify({
+            "average_aqi": 0,
+            "max_aqi": 0,
+            "exposure_score": 0,
+            "category": "Unknown",
+            "error": str(e)
+        }), 500
 
 
 # ============================================================
