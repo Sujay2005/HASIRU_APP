@@ -1,51 +1,92 @@
 console.log("search.js loaded");
 
 
+let searchController = null;
+
+
+/* ================================================= */
+/* SEARCH PLACES */
+/* ================================================= */
+
 async function searchPlaces(
     query,
     suggestionBox,
     inputBox
 ) {
 
-    console.log("Searching:", query);
+    console.log(
+        "Searching:",
+        query
+    );
 
 
-    if (query.trim().length < 3) {
+    const cleanQuery =
+        query.trim();
 
-        suggestionBox.style.display = "none";
+
+    if (
+        cleanQuery.length < 3
+    ) {
+
+        suggestionBox.style.display =
+            "none";
 
         return;
+
     }
+
+
+    /* --------------------------------------------- */
+    /* CANCEL PREVIOUS REQUEST */
+    /* --------------------------------------------- */
+
+    if (searchController) {
+
+        searchController.abort();
+
+    }
+
+
+    searchController =
+        new AbortController();
 
 
     try {
 
         /*
          * IMPORTANT:
-         * Do NOT call Nominatim directly from the browser.
+         * No debounce and no artificial delay.
          *
-         * Flask now acts as the geocoding proxy.
+         * ArcGIS autocomplete is called immediately.
          */
 
         const url =
-            "/geocode?q=" +
-            encodeURIComponent(query);
+            "/autocomplete?q=" +
+            encodeURIComponent(
+                cleanQuery
+            );
 
 
         console.log(
-            "Geocode URL:",
+            "Autocomplete URL:",
             url
         );
 
 
         const response =
-            await fetch(url);
+            await fetch(
+                url,
+                {
+                    signal:
+                        searchController.signal
+                }
+            );
 
 
         if (!response.ok) {
 
             throw new Error(
-                "Geocoding HTTP error: " +
+                "Autocomplete HTTP error: " +
                 response.status
             );
 
@@ -57,12 +98,13 @@ async function searchPlaces(
 
 
         console.log(
-            "Geocoding results:",
+            "Autocomplete results:",
             data
         );
 
 
-        suggestionBox.innerHTML = "";
+        suggestionBox.innerHTML =
+            "";
 
 
         if (
@@ -79,10 +121,18 @@ async function searchPlaces(
                 "block";
 
             return;
+
         }
 
 
-        data.slice(0, 5).forEach(
+        /* ----------------------------------------- */
+        /* CREATE DROPDOWN */
+        /* ----------------------------------------- */
+
+        data.slice(
+            0,
+            5
+        ).forEach(
             place => {
 
                 const div =
@@ -100,9 +150,13 @@ async function searchPlaces(
                     place.display_name;
 
 
+                /* --------------------------------- */
+                /* CLICK */
+                /* --------------------------------- */
+
                 div.addEventListener(
                     "click",
-                    function () {
+                    async function () {
 
                         inputBox.value =
                             place.display_name;
@@ -112,80 +166,176 @@ async function searchPlaces(
                             "none";
 
 
-                        const lat =
-                            parseFloat(
-                                place.lat
-                            );
-
-
-                        const lon =
-                            parseFloat(
-                                place.lon
-                            );
-
-
-                        console.log(
-                            "Selected location:",
-                            lat,
-                            lon
-                        );
-
-
                         /*
-                         * Move Leaflet map
+                         * Resolve the selected
+                         * suggestion only after
+                         * the user clicks it.
+                         *
+                         * This does NOT slow down
+                         * the dropdown.
                          */
 
-                        if (
-                            typeof map !==
-                            "undefined"
-                        ) {
+                        try {
 
-                            map.setView(
-                                [
-                                    lat,
+                            const resolveUrl =
+                                "/geocode_resolve?q=" +
+                                encodeURIComponent(
+                                    place.display_name
+                                ) +
+                                "&magicKey=" +
+                                encodeURIComponent(
+                                    place.magicKey || ""
+                                );
+
+
+                            const response =
+                                await fetch(
+                                    resolveUrl
+                                );
+
+
+                            if (!response.ok) {
+
+                                throw new Error(
+                                    "Location resolve HTTP error: " +
+                                    response.status
+                                );
+
+                            }
+
+
+                            const resolved =
+                                await response.json();
+
+
+                            if (
+                                !Array.isArray(
+                                    resolved
+                                ) ||
+                                resolved.length === 0
+                            ) {
+
+                                return;
+
+                            }
+
+
+                            const selected =
+                                resolved[0];
+
+
+                            const lat =
+                                parseFloat(
+                                    selected.lat
+                                );
+
+
+                            const lon =
+                                parseFloat(
+                                    selected.lon
+                                );
+
+
+                            if (
+                                !Number.isFinite(
+                                    lat
+                                ) ||
+                                !Number.isFinite(
                                     lon
-                                ],
-                                15
+                                )
+                            ) {
+
+                                return;
+
+                            }
+
+
+                            console.log(
+                                "Selected location:",
+                                lat,
+                                lon
                             );
+
+
+                            /* --------------------- */
+                            /* MOVE MAP */
+                            /* --------------------- */
+
+                            if (
+                                typeof map !==
+                                "undefined" &&
+                                map
+                            ) {
+
+                                map.setView(
+                                    [
+                                        lat,
+                                        lon
+                                    ],
+                                    15
+                                );
+
+                            }
+
+
+                            /* --------------------- */
+                            /* REMOVE OLD MARKER */
+                            /* --------------------- */
+
+                            if (
+                                window.searchMarker &&
+                                typeof map !==
+                                "undefined" &&
+                                map
+                            ) {
+
+                                map.removeLayer(
+                                    window.searchMarker
+                                );
+
+                            }
+
+
+                            /* --------------------- */
+                            /* CREATE MARKER */
+                            /* --------------------- */
+
+                            if (
+                                typeof map !==
+                                "undefined" &&
+                                map
+                            ) {
+
+                                window.searchMarker =
+                                    L.marker(
+                                        [
+                                            lat,
+                                            lon
+                                        ]
+                                    )
+                                    .addTo(
+                                        map
+                                    )
+                                    .bindPopup(
+                                        "<b>" +
+                                        "Selected Location" +
+                                        "</b><br>" +
+                                        selected.display_name
+                                    )
+                                    .openPopup();
+
+                            }
 
                         }
 
+                        catch (error) {
 
-                        /*
-                         * Remove previous
-                         * search marker
-                         */
-
-                        if (
-                            window.searchMarker
-                        ) {
-
-                            map.removeLayer(
-                                window.searchMarker
+                            console.error(
+                                "Location resolve error:",
+                                error
                             );
 
                         }
-
-
-                        /*
-                         * Create new marker
-                         */
-
-                        window.searchMarker =
-                            L.marker(
-                                [
-                                    lat,
-                                    lon
-                                ]
-                            )
-                            .addTo(map)
-                            .bindPopup(
-                                "<b>" +
-                                "Selected Location" +
-                                "</b><br>" +
-                                place.display_name
-                            )
-                            .openPopup();
 
                     }
                 );
@@ -206,6 +356,20 @@ async function searchPlaces(
     }
 
     catch (error) {
+
+        /*
+         * Ignore cancelled requests.
+         */
+
+        if (
+            error.name ===
+            "AbortError"
+        ) {
+
+            return;
+
+        }
+
 
         console.error(
             "Location search error:",
@@ -333,3 +497,4 @@ if (
     );
 
 }
+``` :chatgpt-content-reference{index="0"}
