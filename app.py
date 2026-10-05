@@ -29,6 +29,8 @@ from urllib.request import Request, urlopen
 
 from datetime import datetime, timezone
 
+import pandas as pd
+
 
 app = Flask(__name__)
 
@@ -333,7 +335,7 @@ LOCAL_PLACES = [
 
 
 # ============================================================
-# HELPER: LOCAL SEARCH
+# LOCAL SEARCH
 # ============================================================
 
 def local_search(query):
@@ -365,23 +367,39 @@ def local_search(query):
         elif name.startswith(query):
             score = 90
 
-        elif any(alias.startswith(query) for alias in aliases):
+        elif any(
+            alias.startswith(query)
+            for alias in aliases
+        ):
             score = 85
 
         elif query in name:
             score = 75
 
-        elif any(query in alias for alias in aliases):
+        elif any(
+            query in alias
+            for alias in aliases
+        ):
             score = 70
 
         if score > 0:
 
             results.append({
-                "display_name": place["name"] + ", Bengaluru, Karnataka, India",
-                "lat": place["lat"],
-                "lon": place["lon"],
-                "source": "local",
-                "_score": score
+                "display_name":
+                    place["name"] +
+                    ", Bengaluru, Karnataka, India",
+
+                "lat":
+                    place["lat"],
+
+                "lon":
+                    place["lon"],
+
+                "source":
+                    "local",
+
+                "_score":
+                    score
             })
 
     results.sort(
@@ -396,23 +414,33 @@ def local_search(query):
 
 
 # ============================================================
-# HELPER: ARC GIS SEARCH
+# ARC GIS SEARCH
 # ============================================================
 
 def arcgis_search(query, limit=5):
 
     params = urlencode({
-        "SingleLine": query,
-        "f": "json",
-        "maxLocations": limit,
-        "outFields": "*",
-        "countryCode": "IND",
 
-        # Bengaluru search area
-        "searchExtent": "77.30,12.75,77.90,13.25",
+        "SingleLine":
+            query,
 
-        # Bengaluru center
-        "location": "77.5946,12.9716"
+        "f":
+            "json",
+
+        "maxLocations":
+            limit,
+
+        "outFields":
+            "*",
+
+        "countryCode":
+            "IND",
+
+        "searchExtent":
+            "77.30,12.75,77.90,13.25",
+
+        "location":
+            "77.5946,12.9716"
     })
 
     url = (
@@ -425,36 +453,59 @@ def arcgis_search(query, limit=5):
     req = Request(
         url,
         headers={
-            "User-Agent": "BengaluruAQINavigator/1.0"
+            "User-Agent":
+                "BengaluruAQINavigator/1.0"
         }
     )
 
-    with urlopen(req, timeout=6) as response:
+    with urlopen(
+        req,
+        timeout=6
+    ) as response:
 
         data = json.loads(
-            response.read().decode("utf-8")
+            response.read().decode(
+                "utf-8"
+            )
         )
 
     results = []
 
-    for candidate in data.get("candidates", []):
+    for candidate in data.get(
+        "candidates",
+        []
+    ):
 
-        location = candidate.get("location", {})
+        location = candidate.get(
+            "location",
+            {}
+        )
 
         lat = location.get("y")
         lon = location.get("x")
 
-        if lat is None or lon is None:
+        if (
+            lat is None or
+            lon is None
+        ):
             continue
 
         results.append({
-            "display_name": candidate.get(
-                "address",
-                query
-            ),
-            "lat": lat,
-            "lon": lon,
-            "source": "arcgis"
+
+            "display_name":
+                candidate.get(
+                    "address",
+                    query
+                ),
+
+            "lat":
+                lat,
+
+            "lon":
+                lon,
+
+            "source":
+                "arcgis"
         })
 
     return results[:limit]
@@ -477,10 +528,10 @@ def autocomplete():
 
     try:
 
-        # First use our instant local database.
-        local_results = local_search(query)
+        local_results = local_search(
+            query
+        )
 
-        # Then use ArcGIS for general locations.
         arcgis_results = arcgis_search(
             query,
             5
@@ -488,14 +539,20 @@ def autocomplete():
 
         results = []
 
-        # Local results always come first.
-        results.extend(local_results)
+        results.extend(
+            local_results
+        )
 
-        # Add ArcGIS results without duplicates.
         existing = {
             (
-                round(float(x["lat"]), 5),
-                round(float(x["lon"]), 5)
+                round(
+                    float(x["lat"]),
+                    5
+                ),
+                round(
+                    float(x["lon"]),
+                    5
+                )
             )
             for x in local_results
         }
@@ -503,19 +560,30 @@ def autocomplete():
         for result in arcgis_results:
 
             key = (
-                round(float(result["lat"]), 5),
-                round(float(result["lon"]), 5)
+                round(
+                    float(result["lat"]),
+                    5
+                ),
+                round(
+                    float(result["lon"]),
+                    5
+                )
             )
 
             if key not in existing:
 
-                results.append(result)
+                results.append(
+                    result
+                )
+
                 existing.add(key)
 
             if len(results) >= 5:
                 break
 
-        return jsonify(results[:5])
+        return jsonify(
+            results[:5]
+        )
 
     except Exception as e:
 
@@ -524,12 +592,14 @@ def autocomplete():
             e
         )
 
-        # Even if ArcGIS fails, local results
-        # should still work.
-        local_results = local_search(query)
+        local_results = local_search(
+            query
+        )
 
         if local_results:
-            return jsonify(local_results)
+            return jsonify(
+                local_results
+            )
 
         return jsonify([])
 
@@ -552,13 +622,15 @@ def geocode():
 
     try:
 
-        # Local places first.
-        local_results = local_search(query)
+        local_results = local_search(
+            query
+        )
 
         if local_results:
-            return jsonify(local_results)
+            return jsonify(
+                local_results
+            )
 
-        # General ArcGIS geocoding.
         results = arcgis_search(
             query,
             5
@@ -574,7 +646,8 @@ def geocode():
         )
 
         return jsonify({
-            "error": "Geocoding failed"
+            "error":
+                "Geocoding failed"
         }), 502
 
 
@@ -642,7 +715,9 @@ def future_heatmap():
 # ESTIMATE AQI
 # ============================================================
 
-@app.route("/estimate/<lat>/<lon>")
+@app.route(
+    "/estimate/<lat>/<lon>"
+)
 def estimate(lat, lon):
 
     try:
@@ -665,7 +740,8 @@ def estimate(lat, lon):
         )
 
         return jsonify({
-            "error": str(e)
+            "error":
+                str(e)
         }), 500
 
 
@@ -731,29 +807,67 @@ def ranking():
 
         points = get_latest_points()
 
-        points = sorted(
-            points,
-            key=lambda x: x.get(
-                "aqi",
-                999
-            )
-        )
+        valid_points = []
 
-        cleanest = points[:3]
+        for point in points:
 
+            try:
+
+                aqi = float(
+                    point.get(
+                        "aqi",
+                        point.get(
+                            "aqi_calibrated"
+                        )
+                    )
+                )
+
+                if pd.notna(aqi):
+
+                    point = dict(point)
+
+                    point["aqi"] = aqi
+
+                    valid_points.append(
+                        point
+                    )
+
+            except (
+                TypeError,
+                ValueError
+            ):
+
+                continue
+
+
+        # Lowest AQI first
+        clean = sorted(
+            valid_points,
+            key=lambda x:
+                x["aqi"]
+        )[:3]
+
+
+        # Highest AQI first
         polluted = sorted(
-            points,
-            key=lambda x: x.get(
-                "aqi",
-                0
-            ),
+            valid_points,
+            key=lambda x:
+                x["aqi"],
             reverse=True
         )[:3]
 
+
+        # IMPORTANT:
+        # Frontend expects "clean".
         return jsonify({
-            "cleanest": cleanest,
-            "polluted": polluted
+
+            "clean":
+                clean,
+
+            "polluted":
+                polluted
         })
+
 
     except Exception as e:
 
@@ -763,7 +877,8 @@ def ranking():
         )
 
         return jsonify({
-            "error": str(e)
+            "error":
+                str(e)
         }), 500
 
 
@@ -778,26 +893,251 @@ def station_history(device):
 
     try:
 
+        print(
+            "Loading station history:",
+            device
+        )
+
+
+        # ----------------------------------------------------
+        # FIRST: use the actual historical data
+        # ----------------------------------------------------
+
+        try:
+
+            df = get_all_history()
+
+            print(
+                "get_all_history rows:",
+                len(df)
+            )
+
+            if (
+                df is not None and
+                not df.empty
+            ):
+
+                if "device_id" in df.columns:
+
+                    df = df[
+                        df["device_id"].astype(str)
+                        == str(device)
+                    ]
+
+
+                if not df.empty:
+
+                    if "timestamp" in df.columns:
+
+                        df["timestamp"] = (
+                            pd.to_datetime(
+                                df["timestamp"],
+                                errors="coerce"
+                            )
+                        )
+
+                        df = df.dropna(
+                            subset=[
+                                "timestamp"
+                            ]
+                        )
+
+                        df = df.sort_values(
+                            "timestamp"
+                        )
+
+
+                    # Return the history needed
+                    # by the Trends page.
+                    if (
+                        "aqi_calibrated"
+                        in df.columns
+                    ):
+
+                        result = df[
+                            [
+                                "timestamp",
+                                "aqi_calibrated"
+                            ]
+                        ].copy()
+
+                        result = result.dropna(
+                            subset=[
+                                "aqi_calibrated"
+                            ]
+                        )
+
+                        result = result.tail(
+                            500
+                        )
+
+                        result["timestamp"] = (
+                            result["timestamp"]
+                            .astype(str)
+                        )
+
+                        result[
+                            "aqi_calibrated"
+                        ] = pd.to_numeric(
+                            result[
+                                "aqi_calibrated"
+                            ],
+                            errors="coerce"
+                        )
+
+                        result = result.dropna(
+                            subset=[
+                                "aqi_calibrated"
+                            ]
+                        )
+
+                        print(
+                            "Returning historical rows:",
+                            len(result)
+                        )
+
+                        return jsonify(
+                            result.to_dict(
+                                "records"
+                            )
+                        )
+
+        except Exception as history_error:
+
+            print(
+                "Historical dataframe error:",
+                history_error
+            )
+
+
+        # ----------------------------------------------------
+        # SECOND FALLBACK: get_history(device)
+        # ----------------------------------------------------
+
+        try:
+
+            history = get_history(
+                device
+            )
+
+            if history is not None:
+
+                if isinstance(
+                    history,
+                    pd.DataFrame
+                ):
+
+                    df = history.copy()
+
+                    if not df.empty:
+
+                        if "timestamp" in df.columns:
+
+                            df["timestamp"] = (
+                                pd.to_datetime(
+                                    df["timestamp"],
+                                    errors="coerce"
+                                )
+                            )
+
+                            df = df.sort_values(
+                                "timestamp"
+                            )
+
+
+                        if (
+                            "aqi_calibrated"
+                            in df.columns
+                        ):
+
+                            result = df[
+                                [
+                                    "timestamp",
+                                    "aqi_calibrated"
+                                ]
+                            ].tail(500)
+
+                            result[
+                                "timestamp"
+                            ] = result[
+                                "timestamp"
+                            ].astype(str)
+
+                            return jsonify(
+                                result.to_dict(
+                                    "records"
+                                )
+                            )
+
+
+                elif isinstance(
+                    history,
+                    list
+                ):
+
+                    return jsonify(
+                        history[-500:]
+                    )
+
+        except Exception as history_error:
+
+            print(
+                "get_history error:",
+                history_error
+            )
+
+
+        # ----------------------------------------------------
+        # FINAL FALLBACK: latest dataframe
+        # ----------------------------------------------------
+
+        print(
+            "Using latest dataframe fallback"
+        )
+
         df = get_latest_dataframe()
 
+        if df is None or df.empty:
+
+            return jsonify([])
+
+
         df = df[
-            df["device_id"] == device
+            df["device_id"].astype(str)
+            == str(device)
         ]
+
+
+        if df.empty:
+
+            return jsonify([])
+
 
         df = df.sort_values(
             "timestamp"
         )
 
-        return jsonify(
-            df[
-                [
-                    "timestamp",
-                    "aqi_calibrated"
-                ]
+
+        result = df[
+            [
+                "timestamp",
+                "aqi_calibrated"
             ]
-            .tail(24)
-            .to_dict("records")
+        ].tail(24)
+
+
+        result["timestamp"] = (
+            result["timestamp"]
+            .astype(str)
         )
+
+
+        return jsonify(
+            result.to_dict(
+                "records"
+            )
+        )
+
 
     except Exception as e:
 
@@ -807,7 +1147,8 @@ def station_history(device):
         )
 
         return jsonify({
-            "error": str(e)
+            "error":
+                str(e)
         }), 500
 
 
@@ -825,18 +1166,21 @@ def heatmap_hour(hour):
         df = get_all_history()
 
         df["timestamp"] = (
-            __import__("pandas")
-            .to_datetime(
-                df["timestamp"]
+            pd.to_datetime(
+                df["timestamp"],
+                errors="coerce"
             )
         )
 
         filtered = df[
-            df["timestamp"].dt.hour == hour
+            df["timestamp"].dt.hour
+            == hour
         ]
 
         return jsonify(
-            filtered.to_dict("records")
+            filtered.to_dict(
+                "records"
+            )
         )
 
     except Exception as e:
@@ -847,7 +1191,8 @@ def heatmap_hour(hour):
         )
 
         return jsonify({
-            "error": str(e)
+            "error":
+                str(e)
         }), 500
 
 
@@ -859,7 +1204,8 @@ def heatmap_hour(hour):
 def ai_dashboard():
 
     return jsonify({
-        "status": "ok"
+        "status":
+            "ok"
     })
 
 
@@ -871,10 +1217,14 @@ def ai_dashboard():
 def system_status():
 
     return jsonify({
-        "status": "online",
-        "timestamp": datetime.now(
-            timezone.utc
-        ).isoformat()
+
+        "status":
+            "online",
+
+        "timestamp":
+            datetime.now(
+                timezone.utc
+            ).isoformat()
     })
 
 
@@ -892,8 +1242,12 @@ def station_prediction_status():
         points = get_predicted_points()
 
         return jsonify({
-            "status": "ok",
-            "count": len(points)
+
+            "status":
+                "ok",
+
+            "count":
+                len(points)
         })
 
     except Exception as e:
@@ -904,8 +1258,12 @@ def station_prediction_status():
         )
 
         return jsonify({
-            "status": "error",
-            "error": str(e)
+
+            "status":
+                "error",
+
+            "error":
+                str(e)
         }), 500
 
 
