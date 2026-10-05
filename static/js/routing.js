@@ -3447,3 +3447,1559 @@ if (
         map.scrollWheelZoom.enable();
     }
 }
+/* =========================================================
+   GOOGLE MAPS STYLE TOUCH CONTROLS
+========================================================= */
+
+/*
+   1 FINGER
+   ----------
+   Normal Leaflet map dragging.
+
+   2 FINGERS
+   ----------
+   • Pinch zoom
+   • Two-finger pan
+   • Two-finger rotation
+
+   IMPORTANT:
+   We do NOT wrap Leaflet's mapPane.
+   We do NOT rotate the map container.
+   We only rotate the visual Leaflet panes.
+
+   This prevents the left/right dragging reversal
+   that happened with the previous implementation.
+*/
+
+
+let mapRotationAngle = 0;
+
+let mapRotationGesture = false;
+
+let rotationGestureStart = {
+    distance: 0,
+    angle: 0,
+    midpointX: 0,
+    midpointY: 0,
+    zoom: 0,
+    rotation: 0
+};
+
+let rotationGestureLastMidpoint = null;
+
+let rotationGestureInitialized = false;
+
+
+/*
+   Leaflet visual panes that should rotate together.
+*/
+const MAP_ROTATION_PANES = [
+    "tilePane",
+    "shadowPane",
+    "overlayPane",
+    "markerPane",
+    "tooltipPane",
+    "popupPane"
+];
+
+
+/* =========================================================
+   ROTATION HELPERS
+========================================================= */
+
+function normalizeRotation(
+    angle
+) {
+
+    while (
+        angle > 180
+    ) {
+
+        angle -= 360;
+    }
+
+    while (
+        angle < -180
+    ) {
+
+        angle += 360;
+    }
+
+    return angle;
+}
+
+
+function getTouchDistance(
+    touch1,
+    touch2
+) {
+
+    return Math.hypot(
+        touch2.clientX -
+        touch1.clientX,
+
+        touch2.clientY -
+        touch1.clientY
+    );
+}
+
+
+function getTouchAngle(
+    touch1,
+    touch2
+) {
+
+    return Math.atan2(
+        touch2.clientY -
+        touch1.clientY,
+
+        touch2.clientX -
+        touch1.clientX
+    ) * 180 / Math.PI;
+}
+
+
+function getTouchMidpoint(
+    touch1,
+    touch2
+) {
+
+    return {
+
+        x:
+            (
+                touch1.clientX +
+                touch2.clientX
+            ) / 2,
+
+        y:
+            (
+                touch1.clientY +
+                touch2.clientY
+            ) / 2
+    };
+}
+
+
+/* =========================================================
+   APPLY ROTATION
+========================================================= */
+
+function applyMapRotation() {
+
+    if (
+        typeof map ===
+        "undefined" ||
+        !map
+    ) {
+
+        return;
+    }
+
+
+    MAP_ROTATION_PANES.forEach(
+        function (
+            paneName
+        ) {
+
+            const pane =
+                map.getPane(
+                    paneName
+                );
+
+
+            if (!pane) {
+
+                return;
+            }
+
+
+            let transform =
+                pane.style.transform ||
+                "";
+
+
+            /*
+               Remove the rotation that this code
+               previously appended.
+            */
+            transform =
+                transform.replace(
+                    /\srotate\(\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:deg)?\s*\)\s*$/i,
+                    ""
+                );
+
+
+            transform =
+                transform.trim();
+
+
+            /*
+               If Leaflet has not supplied a transform,
+               keep a valid transform origin.
+            */
+            if (
+                !transform
+            ) {
+
+                transform =
+                    "translate3d(0,0,0)";
+            }
+
+
+            pane.style.transformOrigin =
+                "50% 50%";
+
+            pane.style.webkitTransformOrigin =
+                "50% 50%";
+
+
+            pane.style.transform =
+                transform +
+                " rotate(" +
+                mapRotationAngle +
+                "deg)";
+
+
+            pane.style.webkitTransform =
+                transform +
+                " rotate(" +
+                mapRotationAngle +
+                "deg)";
+        }
+    );
+}
+
+
+/* =========================================================
+   REQUEST ROTATION UPDATE
+========================================================= */
+
+function scheduleMapRotationApply() {
+
+    if (
+        typeof map ===
+        "undefined" ||
+        !map
+    ) {
+
+        return;
+    }
+
+
+    if (
+        window.requestAnimationFrame
+    ) {
+
+        window.requestAnimationFrame(
+            function () {
+
+                applyMapRotation();
+            }
+        );
+
+    } else {
+
+        setTimeout(
+            function () {
+
+                applyMapRotation();
+
+            },
+            0
+        );
+    }
+}
+
+
+/* =========================================================
+   RESET ROTATION
+========================================================= */
+
+function resetMapRotation() {
+
+    mapRotationAngle = 0;
+
+
+    if (
+        typeof map ===
+        "undefined" ||
+        !map
+    ) {
+
+        return;
+    }
+
+
+    MAP_ROTATION_PANES.forEach(
+        function (
+            paneName
+        ) {
+
+            const pane =
+                map.getPane(
+                    paneName
+                );
+
+
+            if (!pane) {
+
+                return;
+            }
+
+
+            let transform =
+                pane.style.transform ||
+                "";
+
+
+            transform =
+                transform.replace(
+                    /\srotate\(\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:deg)?\s*\)\s*$/i,
+                    ""
+                );
+
+
+            pane.style.transform =
+                transform;
+
+            pane.style.webkitTransform =
+                transform;
+
+
+            pane.style.transformOrigin =
+                "";
+
+            pane.style.webkitTransformOrigin =
+                "";
+        }
+    );
+}
+
+
+/* =========================================================
+   START TWO-FINGER GESTURE
+========================================================= */
+
+function startTwoFingerMapGesture(
+    touch1,
+    touch2
+) {
+
+    if (
+        typeof map ===
+        "undefined" ||
+        !map
+    ) {
+
+        return;
+    }
+
+
+    const midpoint =
+        getTouchMidpoint(
+            touch1,
+            touch2
+        );
+
+
+    rotationGestureStart = {
+
+        distance:
+            getTouchDistance(
+                touch1,
+                touch2
+            ),
+
+        angle:
+            getTouchAngle(
+                touch1,
+                touch2
+            ),
+
+        midpointX:
+            midpoint.x,
+
+        midpointY:
+            midpoint.y,
+
+        zoom:
+            map.getZoom(),
+
+        rotation:
+            mapRotationAngle
+    };
+
+
+    rotationGestureLastMidpoint =
+        midpoint;
+
+
+    rotationGestureInitialized =
+        true;
+
+
+    mapRotationGesture =
+        true;
+
+
+    /*
+       Temporarily disable Leaflet's native touch
+       interactions while the two-finger gesture
+       is being controlled here.
+    */
+
+    if (
+        map.dragging &&
+        map.dragging.enabled()
+    ) {
+
+        map.dragging.disable();
+    }
+
+
+    if (
+        map.touchZoom &&
+        map.touchZoom.enabled()
+    ) {
+
+        map.touchZoom.disable();
+    }
+
+
+    applyMapRotation();
+}
+
+
+/* =========================================================
+   UPDATE TWO-FINGER GESTURE
+========================================================= */
+
+function updateTwoFingerMapGesture(
+    touch1,
+    touch2
+) {
+
+    if (
+        typeof map ===
+        "undefined" ||
+        !map ||
+        !rotationGestureInitialized
+    ) {
+
+        return;
+    }
+
+
+    const currentDistance =
+        getTouchDistance(
+            touch1,
+            touch2
+        );
+
+
+    const currentAngle =
+        getTouchAngle(
+            touch1,
+            touch2
+        );
+
+
+    const currentMidpoint =
+        getTouchMidpoint(
+            touch1,
+            touch2
+        );
+
+
+    /* =====================================================
+       ROTATION
+    ===================================================== */
+
+    const angleDelta =
+        normalizeRotation(
+            currentAngle -
+            rotationGestureStart.angle
+        );
+
+
+    mapRotationAngle =
+        normalizeRotation(
+            rotationGestureStart.rotation +
+            angleDelta
+        );
+
+
+    /* =====================================================
+       PINCH ZOOM
+    ===================================================== */
+
+    let zoomDelta = 0;
+
+
+    if (
+        rotationGestureStart.distance > 0 &&
+        currentDistance > 0
+    ) {
+
+        zoomDelta =
+            Math.log(
+                currentDistance /
+                rotationGestureStart.distance
+            ) /
+            Math.LN2;
+    }
+
+
+    let targetZoom =
+        rotationGestureStart.zoom +
+        zoomDelta;
+
+
+    targetZoom =
+        Math.max(
+            map.getMinZoom(),
+            Math.min(
+                map.getMaxZoom(),
+                targetZoom
+            )
+        );
+
+
+    /*
+       Zoom around the actual two-finger midpoint.
+    */
+
+    try {
+
+        map.setZoomAround(
+            L.point(
+                currentMidpoint.x,
+                currentMidpoint.y
+            ),
+
+            targetZoom,
+
+            {
+                animate: false
+            }
+        );
+
+    } catch (
+        error
+    ) {
+
+        map.setZoom(
+            targetZoom,
+            {
+                animate: false
+            }
+        );
+    }
+
+
+    /* =====================================================
+       TWO-FINGER PAN
+    ===================================================== */
+
+    if (
+        rotationGestureLastMidpoint
+    ) {
+
+        const deltaX =
+            currentMidpoint.x -
+            rotationGestureLastMidpoint.x;
+
+
+        const deltaY =
+            currentMidpoint.y -
+            rotationGestureLastMidpoint.y;
+
+
+        if (
+            Math.abs(deltaX) > 0.1 ||
+            Math.abs(deltaY) > 0.1
+        ) {
+
+            /*
+               Positive delta means the map follows the
+               fingers in the same direction.
+
+               Therefore:
+               finger left  -> map left
+               finger right -> map right
+            */
+
+            map.panBy(
+                L.point(
+                    deltaX,
+                    deltaY
+                ),
+
+                {
+                    animate: false,
+                    noMoveStart: true
+                }
+            );
+        }
+    }
+
+
+    rotationGestureLastMidpoint =
+        currentMidpoint;
+
+
+    scheduleMapRotationApply();
+}
+
+
+/* =========================================================
+   FINISH TWO-FINGER GESTURE
+========================================================= */
+
+function finishTwoFingerMapGesture() {
+
+    if (
+        !mapRotationGesture
+    ) {
+
+        return;
+    }
+
+
+    mapRotationGesture =
+        false;
+
+
+    rotationGestureInitialized =
+        false;
+
+
+    rotationGestureLastMidpoint =
+        null;
+
+
+    /*
+       Restore normal Leaflet interactions.
+    */
+
+    if (
+        typeof map !==
+        "undefined" &&
+        map
+    ) {
+
+        if (
+            map.dragging &&
+            !map.dragging.enabled()
+        ) {
+
+            map.dragging.enable();
+        }
+
+
+        if (
+            map.touchZoom &&
+            !map.touchZoom.enabled()
+        ) {
+
+            map.touchZoom.enable();
+        }
+    }
+
+
+    scheduleMapRotationApply();
+}
+
+
+/* =========================================================
+   INSTALL TOUCH CONTROLS
+========================================================= */
+
+function installGoogleMapsTouchControls() {
+
+    if (
+        typeof map ===
+        "undefined" ||
+        !map
+    ) {
+
+        return;
+    }
+
+
+    const container =
+        map.getContainer();
+
+
+    if (!container) {
+
+        return;
+    }
+
+
+    if (
+        container.dataset
+            .googleTouchControlsInstalled ===
+        "true"
+    ) {
+
+        return;
+    }
+
+
+    container.dataset
+        .googleTouchControlsInstalled =
+        "true";
+
+
+    /*
+       Do NOT use touch-action:none.
+
+       Leaflet must continue receiving normal
+       one-finger dragging.
+    */
+
+    container.style.webkitUserSelect =
+        "none";
+
+    container.style.userSelect =
+        "none";
+
+
+    /* =====================================================
+       TOUCH START
+    ===================================================== */
+
+    container.addEventListener(
+        "touchstart",
+
+        function (
+            event
+        ) {
+
+            if (
+                event.touches.length >= 2
+            ) {
+
+                /*
+                   Disable Leaflet's one-finger handler
+                   as soon as the second finger appears.
+                */
+
+                if (
+                    map.dragging &&
+                    map.dragging.enabled()
+                ) {
+
+                    map.dragging.disable();
+                }
+
+
+                if (
+                    map.touchZoom &&
+                    map.touchZoom.enabled()
+                ) {
+
+                    map.touchZoom.disable();
+                }
+
+
+                startTwoFingerMapGesture(
+                    event.touches[0],
+                    event.touches[1]
+                );
+
+
+                event.preventDefault();
+                event.stopPropagation();
+            }
+
+        },
+
+        {
+            passive: false,
+            capture: true
+        }
+    );
+
+
+    /* =====================================================
+       TOUCH MOVE
+    ===================================================== */
+
+    container.addEventListener(
+        "touchmove",
+
+        function (
+            event
+        ) {
+
+            if (
+                mapRotationGesture &&
+                event.touches.length >= 2
+            ) {
+
+                updateTwoFingerMapGesture(
+                    event.touches[0],
+                    event.touches[1]
+                );
+
+
+                event.preventDefault();
+                event.stopPropagation();
+            }
+
+        },
+
+        {
+            passive: false,
+            capture: true
+        }
+    );
+
+
+    /* =====================================================
+       TOUCH END
+    ===================================================== */
+
+    container.addEventListener(
+        "touchend",
+
+        function (
+            event
+        ) {
+
+            if (
+                !mapRotationGesture
+            ) {
+
+                return;
+            }
+
+
+            /*
+               If two fingers still remain,
+               continue the gesture.
+            */
+
+            if (
+                event.touches.length >= 2
+            ) {
+
+                startTwoFingerMapGesture(
+                    event.touches[0],
+                    event.touches[1]
+                );
+
+
+                event.preventDefault();
+                event.stopPropagation();
+
+
+                return;
+            }
+
+
+            finishTwoFingerMapGesture();
+        },
+
+        {
+            passive: false,
+            capture: true
+        }
+    );
+
+
+    /* =====================================================
+       TOUCH CANCEL
+    ===================================================== */
+
+    container.addEventListener(
+        "touchcancel",
+
+        function () {
+
+            finishTwoFingerMapGesture();
+
+        },
+
+        {
+            passive: false,
+            capture: true
+        }
+    );
+
+
+    /* =====================================================
+       RE-APPLY ROTATION AFTER LEAFLET MOVES
+    ===================================================== */
+
+    map.on(
+        "move zoom zoomend moveend",
+
+        function () {
+
+            if (
+                Math.abs(
+                    mapRotationAngle
+                ) > 0.01
+            ) {
+
+                scheduleMapRotationApply();
+            }
+        }
+    );
+
+
+    applyMapRotation();
+}
+
+
+/* =========================================================
+   MOBILE NORTH BUTTON
+========================================================= */
+
+function createNorthButton() {
+
+    if (
+        document.getElementById(
+            "mapRotationResetButton"
+        )
+    ) {
+
+        return;
+    }
+
+
+    const button =
+        document.createElement(
+            "button"
+        );
+
+
+    button.id =
+        "mapRotationResetButton";
+
+
+    button.type =
+        "button";
+
+
+    button.textContent =
+        "N";
+
+
+    button.title =
+        "Reset map to north";
+
+
+    button.setAttribute(
+        "aria-label",
+        "Reset map to north"
+    );
+
+
+    button.style.cssText = `
+        position:fixed;
+        right:14px;
+        z-index:4500;
+        width:38px;
+        height:38px;
+        padding:0;
+        border:1px solid rgba(59,130,246,.55);
+        border-radius:50%;
+        background:rgba(5,15,30,.94);
+        color:#fff;
+        font-size:13px;
+        font-weight:800;
+        box-shadow:0 5px 18px rgba(0,0,0,.35);
+        backdrop-filter:blur(8px);
+        -webkit-backdrop-filter:blur(8px);
+        cursor:pointer;
+        touch-action:manipulation;
+    `;
+
+
+    button.addEventListener(
+        "click",
+
+        function (
+            event
+        ) {
+
+            event.preventDefault();
+            event.stopPropagation();
+
+
+            resetMapRotation();
+
+
+            if (
+                typeof map !==
+                "undefined" &&
+                map
+            ) {
+
+                map.invalidateSize();
+            }
+        }
+    );
+
+
+    document.body.appendChild(
+        button
+    );
+
+
+    positionNorthButton();
+}
+
+
+function positionNorthButton() {
+
+    const button =
+        document.getElementById(
+            "mapRotationResetButton"
+        );
+
+
+    if (!button) {
+
+        return;
+    }
+
+
+    const recenterButton =
+        document.getElementById(
+            "recenterMapBtn"
+        );
+
+
+    if (!recenterButton) {
+
+        button.style.top =
+            "270px";
+
+        return;
+    }
+
+
+    const rect =
+        recenterButton.getBoundingClientRect();
+
+
+    button.style.top =
+        (
+            rect.bottom + 8
+        ) + "px";
+}
+
+
+/* =========================================================
+   SATELLITE MAP
+========================================================= */
+
+let satelliteMapLayer = null;
+
+let satelliteMapActive = false;
+
+let normalBaseLayers = [];
+
+
+function captureNormalBaseLayers() {
+
+    if (
+        typeof map ===
+        "undefined" ||
+        !map ||
+        !map._layers
+    ) {
+
+        return;
+    }
+
+
+    normalBaseLayers = [];
+
+
+    Object.keys(
+        map._layers
+    ).forEach(
+        function (
+            key
+        ) {
+
+            const layer =
+                map._layers[key];
+
+
+            if (
+                layer instanceof
+                L.TileLayer
+            ) {
+
+                normalBaseLayers.push(
+                    layer
+                );
+            }
+        }
+    );
+}
+
+
+function createSatelliteMapLayer() {
+
+    if (
+        satelliteMapLayer
+    ) {
+
+        return;
+    }
+
+
+    satelliteMapLayer =
+        L.tileLayer(
+
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+
+            {
+                maxZoom: 19,
+
+                attribution:
+                    "Tiles © Esri"
+            }
+        );
+}
+
+
+function setSatelliteMapMode() {
+
+    if (
+        typeof map ===
+        "undefined" ||
+        !map
+    ) {
+
+        return;
+    }
+
+
+    createSatelliteMapLayer();
+
+
+    if (
+        !normalBaseLayers.length
+    ) {
+
+        captureNormalBaseLayers();
+    }
+
+
+    normalBaseLayers.forEach(
+        function (
+            layer
+        ) {
+
+            if (
+                map.hasLayer(
+                    layer
+                )
+            ) {
+
+                map.removeLayer(
+                    layer
+                );
+            }
+        }
+    );
+
+
+    satelliteMapLayer.addTo(
+        map
+    );
+
+
+    satelliteMapActive =
+        true;
+
+
+    updateSatelliteButton();
+
+
+    scheduleMapRotationApply();
+}
+
+
+function setNormalMapMode() {
+
+    if (
+        typeof map ===
+        "undefined" ||
+        !map
+    ) {
+
+        return;
+    }
+
+
+    if (
+        satelliteMapLayer
+    ) {
+
+        map.removeLayer(
+            satelliteMapLayer
+        );
+    }
+
+
+    let restored =
+        false;
+
+
+    normalBaseLayers.forEach(
+        function (
+            layer
+        ) {
+
+            if (
+                !restored
+            ) {
+
+                layer.addTo(
+                    map
+                );
+
+
+                restored =
+                    true;
+            }
+        }
+    );
+
+
+    satelliteMapActive =
+        false;
+
+
+    updateSatelliteButton();
+
+
+    scheduleMapRotationApply();
+}
+
+
+function toggleSatelliteMap() {
+
+    if (
+        satelliteMapActive
+    ) {
+
+        setNormalMapMode();
+
+    } else {
+
+        setSatelliteMapMode();
+    }
+}
+
+
+function updateSatelliteButton() {
+
+    const button =
+        document.getElementById(
+            "satelliteMapBtn"
+        );
+
+
+    if (!button) {
+
+        return;
+    }
+
+
+    if (
+        satelliteMapActive
+    ) {
+
+        button.innerHTML =
+            "🗺️&nbsp; Map";
+
+
+        button.title =
+            "Switch to normal map";
+
+    } else {
+
+        button.innerHTML =
+            "🛰️&nbsp; Satellite";
+
+
+        button.title =
+            "Switch to satellite view";
+    }
+}
+
+
+function createSatelliteMapButton() {
+
+    if (
+        document.getElementById(
+            "satelliteMapBtn"
+        )
+    ) {
+
+        return;
+    }
+
+
+    captureNormalBaseLayers();
+
+
+    const button =
+        document.createElement(
+            "button"
+        );
+
+
+    button.id =
+        "satelliteMapBtn";
+
+
+    button.type =
+        "button";
+
+
+    button.innerHTML =
+        "🛰️&nbsp; Satellite";
+
+
+    button.title =
+        "Switch to satellite view";
+
+
+    button.style.cssText = `
+        position:fixed;
+        right:14px;
+        z-index:4500;
+        height:38px;
+        padding:0 13px;
+        border:1px solid rgba(59,130,246,.55);
+        border-radius:20px;
+        background:rgba(5,15,30,.94);
+        color:#fff;
+        font-size:12px;
+        font-weight:700;
+        cursor:pointer;
+        box-shadow:0 5px 18px rgba(0,0,0,.35);
+        backdrop-filter:blur(8px);
+        -webkit-backdrop-filter:blur(8px);
+        touch-action:manipulation;
+    `;
+
+
+    button.addEventListener(
+        "click",
+
+        function (
+            event
+        ) {
+
+            event.preventDefault();
+            event.stopPropagation();
+
+
+            toggleSatelliteMap();
+        }
+    );
+
+
+    document.body.appendChild(
+        button
+    );
+
+
+    positionSatelliteButton();
+}
+
+
+function positionSatelliteButton() {
+
+    const button =
+        document.getElementById(
+            "satelliteMapBtn"
+        );
+
+
+    if (!button) {
+
+        return;
+    }
+
+
+    const northButton =
+        document.getElementById(
+            "mapRotationResetButton"
+        );
+
+
+    const recenterButton =
+        document.getElementById(
+            "recenterMapBtn"
+        );
+
+
+    const referenceButton =
+        northButton ||
+        recenterButton;
+
+
+    if (!referenceButton) {
+
+        button.style.top =
+            "270px";
+
+        return;
+    }
+
+
+    const rect =
+        referenceButton.getBoundingClientRect();
+
+
+    button.style.top =
+        (
+            rect.bottom + 8
+        ) + "px";
+}
+
+
+/* =========================================================
+   FINAL INITIALIZATION
+========================================================= */
+
+function initializeMapControls() {
+
+    createNorthButton();
+
+    createSatelliteMapButton();
+
+    createRecenterButton();
+
+    installGoogleMapsTouchControls();
+
+
+    setTimeout(
+        function () {
+
+            positionNorthButton();
+
+            positionSatelliteButton();
+
+            setupLayersRecenterPosition();
+
+            installGoogleMapsTouchControls();
+
+        },
+
+        300
+    );
+
+
+    setTimeout(
+        function () {
+
+            positionNorthButton();
+
+            positionSatelliteButton();
+
+            setupLayersRecenterPosition();
+
+            installGoogleMapsTouchControls();
+
+        },
+
+        1000
+    );
+
+
+    window.addEventListener(
+        "resize",
+
+        function () {
+
+            positionNorthButton();
+
+            positionSatelliteButton();
+
+            setupLayersRecenterPosition();
+
+        }
+    );
+}
+
+
+if (
+    document.readyState ===
+    "loading"
+) {
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        initializeMapControls
+    );
+
+} else {
+
+    initializeMapControls();
+}
+
+
+/* =========================================================
+   ENSURE LEAFLET TOUCH HANDLING
+========================================================= */
+
+if (
+    typeof map !==
+    "undefined" &&
+    map
+) {
+
+    /*
+       Normal one-finger dragging.
+    */
+
+    if (
+        map.dragging &&
+        !map.dragging.enabled()
+    ) {
+
+        map.dragging.enable();
+    }
+
+
+    /*
+       Normal Leaflet pinch support remains enabled
+       whenever our two-finger gesture is inactive.
+    */
+
+    if (
+        map.touchZoom &&
+        !map.touchZoom.enabled()
+    ) {
+
+        map.touchZoom.enable();
+    }
+
+
+    if (
+        map.scrollWheelZoom &&
+        !map.scrollWheelZoom.enabled()
+    ) {
+
+        map.scrollWheelZoom.enable();
+    }
+
+
+    installGoogleMapsTouchControls();
+}
