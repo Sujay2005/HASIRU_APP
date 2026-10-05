@@ -1,10 +1,6 @@
 console.log("search.js loaded");
 
 
-// ============================================================
-// SEARCH PLACES
-// ============================================================
-
 async function searchPlaces(
     query,
     suggestionBox,
@@ -28,19 +24,23 @@ async function searchPlaces(
         return;
     }
 
+
     try {
 
         const url =
             "/autocomplete?q=" +
             encodeURIComponent(query);
 
+
         console.log(
             "Autocomplete URL:",
             url
         );
 
+
         const response =
             await fetch(url);
+
 
         if (!response.ok) {
 
@@ -50,20 +50,19 @@ async function searchPlaces(
             );
         }
 
+
         const data =
             await response.json();
+
 
         console.log(
             "Autocomplete results:",
             data
         );
 
+
         suggestionBox.innerHTML = "";
 
-
-        // ====================================================
-        // NO RESULTS
-        // ====================================================
 
         if (
             !Array.isArray(data) ||
@@ -82,10 +81,6 @@ async function searchPlaces(
         }
 
 
-        // ====================================================
-        // DISPLAY RESULTS
-        // ====================================================
-
         data
             .slice(0, 5)
             .forEach(place => {
@@ -95,26 +90,27 @@ async function searchPlaces(
                         "div"
                     );
 
-                // Keep your existing dropdown class.
+
                 div.className =
                     "suggestion";
+
 
                 div.textContent =
                     "📍 " +
                     place.display_name;
 
 
-                // =================================================
-                // CLICK RESULT
-                // =================================================
-
                 div.addEventListener(
                     "click",
                     function () {
 
+                        // Put selected location
+                        // into the input.
                         inputBox.value =
                             place.display_name;
 
+
+                        // Close dropdown.
                         suggestionBox.style.display =
                             "none";
 
@@ -151,13 +147,16 @@ async function searchPlaces(
                         }
 
 
-                        // =============================================
-                        // MOVE MAP
-                        // =============================================
-
+                        // Move the map only.
+                        //
+                        // IMPORTANT:
+                        // Do NOT create a search marker here.
+                        // routing.js owns source/destination
+                        // markers.
                         if (
                             typeof map !==
-                            "undefined"
+                            "undefined" &&
+                            map
                         ) {
 
                             map.setView(
@@ -167,42 +166,8 @@ async function searchPlaces(
                                 ],
                                 15
                             );
-
-
-                            // =========================================
-                            // REMOVE OLD SEARCH MARKER
-                            // =========================================
-
-                            if (
-                                window.searchMarker
-                            ) {
-
-                                map.removeLayer(
-                                    window.searchMarker
-                                );
-                            }
-
-
-                            // =========================================
-                            // ADD NEW SEARCH MARKER
-                            // =========================================
-
-                            window.searchMarker =
-                                L.marker(
-                                    [
-                                        lat,
-                                        lon
-                                    ]
-                                )
-                                .addTo(map)
-                                .bindPopup(
-                                    "<b>" +
-                                    "Selected Location" +
-                                    "</b><br>" +
-                                    place.display_name
-                                )
-                                .openPopup();
                         }
+
                     }
                 );
 
@@ -210,6 +175,7 @@ async function searchPlaces(
                 suggestionBox.appendChild(
                     div
                 );
+
             });
 
 
@@ -239,13 +205,14 @@ async function searchPlaces(
 
 
 // ============================================================
-// SOURCE INPUT
+// SOURCE
 // ============================================================
 
 const sourceInput =
     document.getElementById(
         "sourceInput"
     );
+
 
 const sourceSuggestions =
     document.getElementById(
@@ -257,6 +224,7 @@ console.log(
     "Source input:",
     sourceInput
 );
+
 
 console.log(
     "Source suggestions:",
@@ -282,6 +250,7 @@ if (
         }
     );
 
+
     console.log(
         "Source search listener attached"
     );
@@ -289,13 +258,14 @@ if (
 
 
 // ============================================================
-// DESTINATION INPUT
+// DESTINATION
 // ============================================================
 
 const destinationInput =
     document.getElementById(
         "destinationInput"
     );
+
 
 const destinationSuggestions =
     document.getElementById(
@@ -307,6 +277,7 @@ console.log(
     "Destination input:",
     destinationInput
 );
+
 
 console.log(
     "Destination suggestions:",
@@ -332,6 +303,7 @@ if (
         }
     );
 
+
     console.log(
         "Destination search listener attached"
     );
@@ -346,11 +318,16 @@ document.addEventListener(
     "click",
     function (event) {
 
+
         if (
             sourceInput &&
             sourceSuggestions &&
-            !sourceInput.contains(event.target) &&
-            !sourceSuggestions.contains(event.target)
+            !sourceInput.contains(
+                event.target
+            ) &&
+            !sourceSuggestions.contains(
+                event.target
+            )
         ) {
 
             sourceSuggestions.style.display =
@@ -361,8 +338,12 @@ document.addEventListener(
         if (
             destinationInput &&
             destinationSuggestions &&
-            !destinationInput.contains(event.target) &&
-            !destinationSuggestions.contains(event.target)
+            !destinationInput.contains(
+                event.target
+            ) &&
+            !destinationSuggestions.contains(
+                event.target
+            )
         ) {
 
             destinationSuggestions.style.display =
