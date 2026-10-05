@@ -3462,3 +3462,345 @@ INITIALIZE ROUTE SUMMARY
 ========================================================= */
 
 injectRouteSummaryStyles();
+
+/* =========================================================
+   ADD THIS ENTIRE BLOCK AT THE VERY END OF routing.js
+   ========================================================= */
+
+let mapRotationWrapper = null;
+let mapRotationAngle = 0;
+let mapRotationGestureStartAngle = 0;
+let mapRotationGestureStartRotation = 0;
+let mapRotationGestureActive = false;
+
+
+function getTouchAngle(touch1, touch2){
+
+    const dx =
+        touch2.clientX -
+        touch1.clientX;
+
+    const dy =
+        touch2.clientY -
+        touch1.clientY;
+
+    return Math.atan2(
+        dy,
+        dx
+    ) * 180 / Math.PI;
+
+}
+
+
+function setupMobileMapRotation(){
+
+    if(
+        typeof map === "undefined" ||
+        !map
+    ){
+
+        return;
+
+    }
+
+    if(
+        mapRotationWrapper
+    ){
+
+        return;
+
+    }
+
+    const mapContainer =
+        map.getContainer();
+
+    const mapPane =
+        map.getPane("mapPane");
+
+    if(
+        !mapContainer ||
+        !mapPane ||
+        !mapPane.parentNode
+    ){
+
+        return;
+
+    }
+
+
+    /*
+       Wrapper allows Leaflet to continue handling
+       its own map translations while the wrapper
+       independently rotates the map.
+    */
+
+    mapRotationWrapper =
+        document.createElement("div");
+
+    mapRotationWrapper.className =
+        "leaflet-map-rotation-wrapper";
+
+    mapRotationWrapper.style.position =
+        "absolute";
+
+    mapRotationWrapper.style.left =
+        "0";
+
+    mapRotationWrapper.style.top =
+        "0";
+
+    mapRotationWrapper.style.width =
+        "100%";
+
+    mapRotationWrapper.style.height =
+        "100%";
+
+    mapRotationWrapper.style.transformOrigin =
+        "50% 50%";
+
+    mapRotationWrapper.style.pointerEvents =
+        "auto";
+
+    mapRotationWrapper.style.zIndex =
+        "200";
+
+
+    const parent =
+        mapPane.parentNode;
+
+    parent.insertBefore(
+        mapRotationWrapper,
+        mapPane
+    );
+
+    mapRotationWrapper.appendChild(
+        mapPane
+    );
+
+
+    /*
+       Two fingers:
+       - pinch = Leaflet native zoom
+       - rotation = this code
+    */
+
+    mapContainer.addEventListener(
+        "touchstart",
+        function(event){
+
+            if(
+                event.touches.length !== 2
+            ){
+
+                return;
+
+            }
+
+            const angle =
+                getTouchAngle(
+                    event.touches[0],
+                    event.touches[1]
+                );
+
+            mapRotationGestureActive =
+                true;
+
+            mapRotationGestureStartAngle =
+                angle;
+
+            mapRotationGestureStartRotation =
+                mapRotationAngle;
+
+        },
+        {
+            passive:true
+        }
+    );
+
+
+    mapContainer.addEventListener(
+        "touchmove",
+        function(event){
+
+            if(
+                !mapRotationGestureActive ||
+                event.touches.length !== 2 ||
+                !mapRotationWrapper
+            ){
+
+                return;
+
+            }
+
+            const currentAngle =
+                getTouchAngle(
+                    event.touches[0],
+                    event.touches[1]
+                );
+
+            let delta =
+                currentAngle -
+                mapRotationGestureStartAngle;
+
+
+            if(delta > 180){
+
+                delta -= 360;
+
+            }
+
+            if(delta < -180){
+
+                delta += 360;
+
+            }
+
+
+            mapRotationAngle =
+                mapRotationGestureStartRotation +
+                delta;
+
+
+            mapRotationWrapper.style.transform =
+                "rotate(" +
+                mapRotationAngle +
+                "deg)";
+
+        },
+        {
+            passive:true
+        }
+    );
+
+
+    mapContainer.addEventListener(
+        "touchend",
+        function(event){
+
+            if(
+                event.touches.length < 2
+            ){
+
+                mapRotationGestureActive =
+                    false;
+
+            }
+
+        },
+        {
+            passive:true
+        }
+    );
+
+
+    mapContainer.addEventListener(
+        "touchcancel",
+        function(){
+
+            mapRotationGestureActive =
+                false;
+
+        },
+        {
+            passive:true
+        }
+    );
+
+
+    /*
+       Mobile north-up reset button.
+    */
+
+    if(
+        window.innerWidth <= 800
+    ){
+
+        const resetButton =
+            document.createElement(
+                "button"
+            );
+
+        resetButton.id =
+            "mapRotationResetButton";
+
+        resetButton.type =
+            "button";
+
+        resetButton.innerHTML =
+            "N";
+
+        resetButton.title =
+            "Reset map rotation";
+
+        resetButton.setAttribute(
+            "aria-label",
+            "Reset map rotation"
+        );
+
+        resetButton.style.cssText = `
+            position:fixed;
+            right:14px;
+            bottom:78px;
+            z-index:4500;
+            width:38px;
+            height:38px;
+            border-radius:50%;
+            border:1px solid rgba(59,130,246,.55);
+            background:rgba(5,15,30,.94);
+            color:#fff;
+            font-size:13px;
+            font-weight:800;
+            box-shadow:0 5px 18px rgba(0,0,0,.35);
+            backdrop-filter:blur(8px);
+            -webkit-backdrop-filter:blur(8px);
+            cursor:pointer;
+        `;
+
+
+        resetButton.addEventListener(
+            "click",
+            function(event){
+
+                event.preventDefault();
+
+                event.stopPropagation();
+
+                mapRotationAngle = 0;
+
+                if(
+                    mapRotationWrapper
+                ){
+
+                    mapRotationWrapper.style.transform =
+                        "rotate(0deg)";
+
+                }
+
+            }
+        );
+
+
+        document.body.appendChild(
+            resetButton
+        );
+
+    }
+
+}
+
+
+if(
+    typeof map !== "undefined" &&
+    map
+){
+
+    setupMobileMapRotation();
+
+}else{
+
+    window.addEventListener(
+        "load",
+        setupMobileMapRotation
+    );
+
+}
