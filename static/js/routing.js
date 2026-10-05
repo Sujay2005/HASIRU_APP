@@ -3089,6 +3089,218 @@ window.addEventListener(
 );
 
 
+
+/* =========================================================
+   SATELLITE MAP VIEW
+========================================================= */
+
+let satelliteLayer=null;
+let satelliteLabelsLayer=null;
+let satelliteModeActive=false;
+let satelliteControl=null;
+
+function initializeSatelliteMap(){
+
+    if(
+        typeof map==="undefined"||
+        !map||
+        satelliteControl
+    ){
+
+        return;
+    }
+
+    satelliteLayer=
+        L.tileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            {
+                maxZoom:19,
+                attribution:"Tiles © Esri"
+            }
+        );
+
+    satelliteLabelsLayer=
+        L.tileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+            {
+                maxZoom:19,
+                opacity:.95,
+                attribution:"Labels © Esri"
+            }
+        );
+
+    satelliteControl=
+        document.createElement("button");
+
+    satelliteControl.id=
+        "satelliteMapControl";
+
+    satelliteControl.type=
+        "button";
+
+    satelliteControl.innerHTML=
+        "🛰️";
+
+    satelliteControl.title=
+        "Satellite view";
+
+    satelliteControl.setAttribute(
+        "aria-label",
+        "Toggle satellite map"
+    );
+
+    satelliteControl.style.cssText=`
+        position:fixed;
+        top:80px;
+        right:14px;
+        z-index:4500;
+        width:42px;
+        height:42px;
+        padding:0;
+        border:1px solid rgba(59,130,246,.55);
+        border-radius:10px;
+        background:rgba(5,15,30,.94);
+        color:#fff;
+        font-size:20px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        cursor:pointer;
+        box-shadow:0 5px 18px rgba(0,0,0,.35);
+        backdrop-filter:blur(8px);
+        -webkit-backdrop-filter:blur(8px);
+    `;
+
+    satelliteControl.addEventListener(
+        "click",
+        function(event){
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            toggleSatelliteMap();
+        }
+    );
+
+    document.body.appendChild(
+        satelliteControl
+    );
+
+    positionSatelliteControl();
+
+    window.addEventListener(
+        "resize",
+        positionSatelliteControl
+    );
+}
+
+
+function positionSatelliteControl(){
+
+    if(!satelliteControl){
+
+        return;
+    }
+
+    const recenterButton=
+        document.getElementById(
+            "recenterMapBtn"
+        );
+
+    if(recenterButton){
+
+        const rect=
+            recenterButton.getBoundingClientRect();
+
+        satelliteControl.style.top=
+            Math.max(
+                10,
+                rect.top-50
+            )+"px";
+
+    }else{
+
+        const layersControl=
+            document.querySelector(
+                ".leaflet-control-layers"
+            );
+
+        if(layersControl){
+
+            const rect=
+                layersControl.getBoundingClientRect();
+
+            satelliteControl.style.top=
+                Math.max(
+                    10,
+                    rect.top
+                )+"px";
+
+        }else{
+
+            satelliteControl.style.top=
+                "80px";
+        }
+    }
+}
+
+
+function toggleSatelliteMap(){
+
+    if(
+        !map||
+        !satelliteLayer||
+        !satelliteLabelsLayer
+    ){
+
+        return;
+    }
+
+    if(!satelliteModeActive){
+
+        satelliteLayer.addTo(map);
+        satelliteLabelsLayer.addTo(map);
+
+        satelliteModeActive=true;
+
+        if(satelliteControl){
+
+            satelliteControl.innerHTML=
+                "🗺️";
+
+            satelliteControl.title=
+                "Normal map view";
+        }
+
+    }else{
+
+        if(map.hasLayer(satelliteLabelsLayer)){
+
+            map.removeLayer(
+                satelliteLabelsLayer
+            );
+        }
+
+        if(map.hasLayer(satelliteLayer)){
+
+            map.removeLayer(
+                satelliteLayer
+            );
+        }
+
+        satelliteModeActive=false;
+
+        satelliteControl.innerHTML=
+            "🛰️";
+
+        satelliteControl.title=
+            "Satellite view";
+    }
+
+    map.invalidateSize();
+}
+
+
 /* =========================================================
    MOBILE MAP ROTATION
 ========================================================= */
@@ -3480,6 +3692,7 @@ if(
         function(){
 
             setupMobileMapRotation();
+            initializeSatelliteMap();
         }
     );
 
