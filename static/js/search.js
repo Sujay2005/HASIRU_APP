@@ -1,67 +1,35 @@
 console.log("search.js loaded");
 
 
-// ============================================================
-// SEARCH CONTROL
-// ============================================================
-
-let searchTimer = null;
-
-let searchRequestId = 0;
-
-
-// ============================================================
-// SEARCH PLACES
-// ============================================================
-
 async function searchPlaces(
     query,
     suggestionBox,
     inputBox
 ) {
 
-    const cleanQuery = query.trim();
-
-    console.log(
-        "Searching:",
-        cleanQuery
-    );
+    console.log("Searching:", query);
 
 
-    // --------------------------------------------------------
-    // Minimum 3 characters
-    // --------------------------------------------------------
+    if (query.trim().length < 3) {
 
-    if (cleanQuery.length < 3) {
-
-        suggestionBox.innerHTML = "";
-
-        suggestionBox.style.display =
-            "none";
+        suggestionBox.style.display = "none";
 
         return;
     }
 
 
-    // --------------------------------------------------------
-    // Create unique request ID
-    // --------------------------------------------------------
-
-    const requestId =
-        ++searchRequestId;
-
-
     try {
 
         /*
-         * Flask acts as the geocoding proxy.
+         * IMPORTANT:
+         * Do NOT call Nominatim directly from the browser.
+         *
+         * Flask now acts as the geocoding proxy.
          */
 
         const url =
             "/geocode?q=" +
-            encodeURIComponent(
-                cleanQuery
-            );
+            encodeURIComponent(query);
 
 
         console.log(
@@ -72,20 +40,6 @@ async function searchPlaces(
 
         const response =
             await fetch(url);
-
-
-        // ----------------------------------------------------
-        // Ignore old requests
-        // ----------------------------------------------------
-
-        if (
-            requestId !==
-            searchRequestId
-        ) {
-
-            return;
-
-        }
 
 
         if (!response.ok) {
@@ -108,16 +62,8 @@ async function searchPlaces(
         );
 
 
-        // ----------------------------------------------------
-        // Clear suggestions
-        // ----------------------------------------------------
-
         suggestionBox.innerHTML = "";
 
-
-        // ----------------------------------------------------
-        // No results
-        // ----------------------------------------------------
 
         if (
             !Array.isArray(data) ||
@@ -136,14 +82,7 @@ async function searchPlaces(
         }
 
 
-        // ----------------------------------------------------
-        // Display results
-        // ----------------------------------------------------
-
-        data.slice(
-            0,
-            5
-        ).forEach(
+        data.slice(0, 5).forEach(
             place => {
 
                 const div =
@@ -192,9 +131,9 @@ async function searchPlaces(
                         );
 
 
-                        // ------------------------------------------------
-                        // Move map
-                        // ------------------------------------------------
+                        /*
+                         * Move Leaflet map
+                         */
 
                         if (
                             typeof map !==
@@ -212,14 +151,13 @@ async function searchPlaces(
                         }
 
 
-                        // ------------------------------------------------
-                        // Remove previous search marker
-                        // ------------------------------------------------
+                        /*
+                         * Remove previous
+                         * search marker
+                         */
 
                         if (
-                            window.searchMarker &&
-                            typeof map !==
-                            "undefined"
+                            window.searchMarker
                         ) {
 
                             map.removeLayer(
@@ -229,34 +167,25 @@ async function searchPlaces(
                         }
 
 
-                        // ------------------------------------------------
-                        // Create search marker
-                        // ------------------------------------------------
+                        /*
+                         * Create new marker
+                         */
 
-                        if (
-                            typeof L !==
-                            "undefined" &&
-                            typeof map !==
-                            "undefined"
-                        ) {
-
-                            window.searchMarker =
-                                L.marker(
-                                    [
-                                        lat,
-                                        lon
-                                    ]
-                                )
-                                .addTo(map)
-                                .bindPopup(
-                                    "<b>" +
-                                    "Selected Location" +
-                                    "</b><br>" +
-                                    place.display_name
-                                )
-                                .openPopup();
-
-                        }
+                        window.searchMarker =
+                            L.marker(
+                                [
+                                    lat,
+                                    lon
+                                ]
+                            )
+                            .addTo(map)
+                            .bindPopup(
+                                "<b>" +
+                                "Selected Location" +
+                                "</b><br>" +
+                                place.display_name
+                            )
+                            .openPopup();
 
                     }
                 );
@@ -275,18 +204,8 @@ async function searchPlaces(
 
 
     }
+
     catch (error) {
-
-        // Ignore an old request
-        if (
-            requestId !==
-            searchRequestId
-        ) {
-
-            return;
-
-        }
-
 
         console.error(
             "Location search error:",
@@ -308,40 +227,9 @@ async function searchPlaces(
 }
 
 
-// ============================================================
-// DEBOUNCED SEARCH
-// ============================================================
-
-function scheduleSearch(
-    inputBox,
-    suggestionBox
-) {
-
-    clearTimeout(
-        searchTimer
-    );
-
-
-    searchTimer =
-        setTimeout(
-            function () {
-
-                searchPlaces(
-                    inputBox.value,
-                    suggestionBox,
-                    inputBox
-                );
-
-            },
-            700
-        );
-
-}
-
-
-// ============================================================
-// SOURCE
-// ============================================================
+/* ================================================= */
+/* SOURCE */
+/* ================================================= */
 
 const sourceInput =
     document.getElementById(
@@ -376,9 +264,10 @@ if (
         "input",
         function () {
 
-            scheduleSearch(
-                sourceInput,
-                sourceSuggestions
+            searchPlaces(
+                this.value,
+                sourceSuggestions,
+                sourceInput
             );
 
         }
@@ -392,9 +281,9 @@ if (
 }
 
 
-// ============================================================
-// DESTINATION
-// ============================================================
+/* ================================================= */
+/* DESTINATION */
+/* ================================================= */
 
 const destinationInput =
     document.getElementById(
@@ -429,9 +318,10 @@ if (
         "input",
         function () {
 
-            scheduleSearch(
-                destinationInput,
-                destinationSuggestions
+            searchPlaces(
+                this.value,
+                destinationSuggestions,
+                destinationInput
             );
 
         }
