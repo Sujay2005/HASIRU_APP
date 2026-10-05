@@ -24,11 +24,7 @@ let navigationRouteCoords=null;
 let lastNavigationRerouteTime=0;
 let lastKnownNavigationPosition=null;
 
-/* NEW: continuous map-follow mode */
 let navigationFollowMode=false;
-
-/* NEW: preserve the complete route while trimming the
-   already-travelled portion */
 let navigationFullRouteCoords=null;
 
 const NAVIGATION_OFF_ROUTE_DISTANCE=50;
@@ -39,15 +35,12 @@ function getDistanceMeters(lat1,lng1,lat2,lng2){
 
 const R=6371000;
 
-const dLat=
-(lat2-lat1)*Math.PI/180;
+const dLat=(lat2-lat1)*Math.PI/180;
 
-const dLng=
-(lng2-lng1)*Math.PI/180;
+const dLng=(lng2-lng1)*Math.PI/180;
 
 const a=
-Math.sin(dLat/2)*
-Math.sin(dLat/2)+
+Math.sin(dLat/2)*Math.sin(dLat/2)+
 Math.cos(lat1*Math.PI/180)*
 Math.cos(lat2*Math.PI/180)*
 Math.sin(dLng/2)*
@@ -73,28 +66,17 @@ Math.cos(
 point.lat*Math.PI/180
 );
 
-const px=
-point.lng*lngScale;
+const px=point.lng*lngScale;
+const py=point.lat*latScale;
 
-const py=
-point.lat*latScale;
+const ax=a[1]*lngScale;
+const ay=a[0]*latScale;
 
-const ax=
-a[1]*lngScale;
-
-const ay=
-a[0]*latScale;
-
-const bx=
-b[1]*lngScale;
-
-const by=
-b[0]*latScale;
+const bx=b[1]*lngScale;
+const by=b[0]*latScale;
 
 const dx=bx-ax;
-
 const dy=by-ay;
-
 
 if(
 dx===0&&
@@ -108,7 +90,6 @@ py-ay
 
 }
 
-
 let t=
 (
 (px-ax)*dx+
@@ -119,7 +100,6 @@ dx*dx+
 dy*dy
 );
 
-
 t=
 Math.max(
 0,
@@ -128,7 +108,6 @@ Math.min(
 t
 )
 );
-
 
 return Math.hypot(
 px-(ax+t*dx),
@@ -152,9 +131,7 @@ return Infinity;
 
 }
 
-
 let minimum=Infinity;
-
 
 for(
 let i=0;
@@ -174,19 +151,12 @@ coords[i+1]
 
 }
 
-
 return minimum;
 
 }
 
 
-/* =========================================================
-NAVIGATION MARKER
-========================================================= */
-
-function createNavigationMarker(
-position
-){
+function createNavigationMarker(position){
 
 if(navigationMarker){
 
@@ -198,7 +168,6 @@ position.lng
 return;
 
 }
-
 
 navigationMarker=
 L.circleMarker(
@@ -219,12 +188,10 @@ fillOpacity:1
 
 
 /* =========================================================
-DRAW NAVIGATION ROUTE
+DRAW LIVE NAVIGATION ROUTE
 ========================================================= */
 
-function drawNavigationRoute(
-coords
-){
+function drawNavigationRoute(coords){
 
 if(
 !coords||
@@ -235,12 +202,9 @@ return;
 
 }
 
-
 /*
-Store a copy of the complete route.
-
-navigationRouteCoords will contain only
-the remaining route during navigation.
+Keep a complete copy of the current navigation route.
+The displayed route will be shortened as GPS moves forward.
 */
 
 navigationFullRouteCoords=
@@ -249,7 +213,6 @@ coords.slice();
 navigationRouteCoords=
 coords.slice();
 
-
 if(navigationRoutePolyline){
 
 map.removeLayer(
@@ -257,7 +220,6 @@ navigationRoutePolyline
 );
 
 }
-
 
 navigationRoutePolyline=
 L.polyline(
@@ -273,7 +235,7 @@ opacity:.95
 
 
 /* =========================================================
-REMOVE TRAVELLED ROUTE
+REMOVE ALREADY TRAVELLED ROUTE
 ========================================================= */
 
 function trimNavigationRoute(
@@ -291,16 +253,8 @@ return;
 
 }
 
-
 let nearestIndex=0;
-
 let nearestDistance=Infinity;
-
-
-/*
-Find the point on the original route
-closest to the current GPS position.
-*/
 
 for(
 let i=0;
@@ -311,7 +265,6 @@ i++
 const point=
 navigationFullRouteCoords[i];
 
-
 const distance=
 getDistanceMeters(
 currentPosition.lat,
@@ -319,7 +272,6 @@ currentPosition.lng,
 point[0],
 point[1]
 );
-
 
 if(
 distance<
@@ -329,8 +281,7 @@ nearestDistance
 nearestDistance=
 distance;
 
-nearestIndex=
-i;
+nearestIndex=i;
 
 }
 
@@ -338,7 +289,7 @@ i;
 
 
 /*
-Start the visible route at the
+Start the visible route from the
 current vehicle position.
 */
 
@@ -349,11 +300,6 @@ currentPosition.lng
 ]
 ];
 
-
-/*
-Keep only the part of the route
-ahead of the vehicle.
-*/
 
 for(
 let i=nearestIndex+1;
@@ -369,7 +315,8 @@ navigationFullRouteCoords[i]
 
 
 /*
-Always keep destination visible.
+Always keep destination as the final
+point if the route becomes very short.
 */
 
 if(
@@ -384,18 +331,8 @@ destination.lng
 
 }
 
-
-/*
-Update the active route.
-*/
-
 navigationRouteCoords=
 remainingRoute;
-
-
-/*
-Update the visible blue navigation line.
-*/
 
 navigationRoutePolyline.setLatLngs(
 remainingRoute
@@ -405,7 +342,7 @@ remainingRoute
 
 
 /* =========================================================
-REROUTE
+LIVE REROUTING
 ========================================================= */
 
 async function rerouteNavigation(
@@ -421,13 +358,11 @@ return;
 
 }
 
-
-const now=
-Date.now();
-
+const now=Date.now();
 
 if(
-now-lastNavigationRerouteTime<
+now-
+lastNavigationRerouteTime<
 NAVIGATION_REROUTE_COOLDOWN
 ){
 
@@ -435,10 +370,7 @@ return;
 
 }
 
-
-lastNavigationRerouteTime=
-now;
-
+lastNavigationRerouteTime=now;
 
 try{
 
@@ -447,12 +379,8 @@ const url=
 `${position.lng},${position.lat};${destination.lng},${destination.lat}`+
 "?overview=full&geometries=geojson";
 
-
 const response=
-await fetch(
-url
-);
-
+await fetch(url);
 
 if(
 !response.ok
@@ -462,10 +390,8 @@ return;
 
 }
 
-
 const data=
 await response.json();
-
 
 if(
 !data.routes||
@@ -475,7 +401,6 @@ if(
 return;
 
 }
-
 
 const coords=
 data.routes[0]
@@ -492,25 +417,16 @@ c[0]
 }
 );
 
-
-/*
-This creates a new complete route
-from the current GPS position.
-*/
-
 drawNavigationRoute(
 coords
 );
-
 
 source={
 lat:position.lat,
 lng:position.lng
 };
 
-
-}
-catch(error){
+}catch(error){
 
 console.error(
 "Navigation reroute failed:",
@@ -538,7 +454,6 @@ return;
 
 }
 
-
 const currentPosition={
 lat:
 position.coords.latitude,
@@ -547,22 +462,11 @@ lng:
 position.coords.longitude
 };
 
-
-/*
-Store latest GPS position.
-*/
-
 lastKnownNavigationPosition=
 currentPosition;
 
-
 source=
 currentPosition;
-
-
-/*
-Move the blue vehicle marker.
-*/
 
 createNavigationMarker(
 currentPosition
@@ -570,9 +474,7 @@ currentPosition
 
 
 /*
-=========================================================
-GOOGLE-MAPS-LIKE FOLLOW MODE
-=========================================================
+FOLLOW VEHICLE CONTINUOUSLY
 */
 
 if(
@@ -597,9 +499,8 @@ animate:true
 
 
 /*
-=========================================================
-REMOVE THE ALREADY TRAVELLED ROUTE
-=========================================================
+REMOVE THE ALREADY TRAVELLED
+PART OF THE ROUTE
 */
 
 trimNavigationRoute(
@@ -608,9 +509,7 @@ currentPosition
 
 
 /*
-=========================================================
-DESTINATION CHECK
-=========================================================
+CHECK DESTINATION
 */
 
 const distanceToDestination=
@@ -621,15 +520,12 @@ destination.lat,
 destination.lng
 );
 
-
 if(
 distanceToDestination<=
 NAVIGATION_DESTINATION_DISTANCE
 ){
 
-stopNavigation(
-true
-);
+stopNavigation(true);
 
 return;
 
@@ -637,9 +533,7 @@ return;
 
 
 /*
-=========================================================
-OFF-ROUTE CHECK
-=========================================================
+CHECK WHETHER VEHICLE LEFT ROUTE
 */
 
 if(
@@ -652,7 +546,6 @@ distanceToRouteMeters(
 currentPosition,
 navigationRouteCoords
 );
-
 
 if(
 routeDistance>
@@ -687,38 +580,28 @@ return;
 
 }
 
-
-navigationActive=
-true;
-
+navigationActive=true;
 
 /*
-Enable automatic map following.
+Automatically follow the vehicle after
+navigation starts.
 */
 
-navigationFollowMode=
-true;
+navigationFollowMode=true;
 
-
-lastNavigationRerouteTime=
-0;
-
+lastNavigationRerouteTime=0;
 
 if(sourceMarker){
 
-sourceMarker.setOpacity(
-0
-);
+sourceMarker.setOpacity(0);
 
 }
-
 
 navigationRouteCoords=
 routeResults[
 selectedRoute
 ].routeCoords||
 null;
-
 
 if(
 navigationRouteCoords
@@ -730,41 +613,14 @@ navigationRouteCoords
 
 }
 
-
 lastKnownNavigationPosition={
 lat:source.lat,
 lng:source.lng
 };
 
-
 createNavigationMarker(
 lastKnownNavigationPosition
 );
-
-
-/*
-Immediately center the map on the
-starting position.
-*/
-
-map.setView(
-[
-source.lat,
-source.lng
-],
-Math.max(
-map.getZoom(),
-17
-),
-{
-animate:true
-}
-);
-
-
-/*
-Clear an old GPS watcher if one exists.
-*/
 
 if(
 navigationWatchId!==null
@@ -776,16 +632,8 @@ navigationWatchId
 
 }
 
-
-/*
-=========================================================
-CONTINUOUS GPS TRACKING
-=========================================================
-*/
-
 navigationWatchId=
 navigator.geolocation.watchPosition(
-
 updateNavigationPosition,
 
 function(error){
@@ -798,13 +646,9 @@ error
 },
 
 {
-
 enableHighAccuracy:true,
-
-maximumAge:1000,
-
+maximumAge:2000,
 timeout:10000
-
 }
 
 );
@@ -820,17 +664,11 @@ function stopNavigation(
 reachedDestination
 ){
 
-navigationActive=
-false;
+navigationActive=false;
 
+navigationFollowMode=false;
 
-/*
-Stop automatic map following.
-*/
-
-navigationFollowMode=
-false;
-
+navigationFullRouteCoords=null;
 
 if(
 navigationWatchId!==null
@@ -840,60 +678,45 @@ navigator.geolocation.clearWatch(
 navigationWatchId
 );
 
-navigationWatchId=
-null;
+navigationWatchId=null;
 
 }
 
-
-if(navigationMarker){
+if(
+navigationMarker
+){
 
 map.removeLayer(
 navigationMarker
 );
 
-navigationMarker=
-null;
+navigationMarker=null;
 
 }
 
-
-if(navigationRoutePolyline){
+if(
+navigationRoutePolyline
+){
 
 map.removeLayer(
 navigationRoutePolyline
 );
 
-navigationRoutePolyline=
-null;
+navigationRoutePolyline=null;
 
 }
 
+navigationRouteCoords=null;
 
-navigationRouteCoords=
-null;
+lastKnownNavigationPosition=null;
 
+if(
+sourceMarker
+){
 
-/*
-Clear the preserved full route.
-*/
-
-navigationFullRouteCoords=
-null;
-
-
-lastKnownNavigationPosition=
-null;
-
-
-if(sourceMarker){
-
-sourceMarker.setOpacity(
-1
-);
+sourceMarker.setOpacity(1);
 
 }
-
 
 if(
 reachedDestination
@@ -915,48 +738,46 @@ RE-CENTER
 function recenterMap(){
 
 /*
-If navigation is active, pressing
-Re-center enables continuous follow.
+If navigation is active, clicking
+Re-center puts the map back into
+automatic follow mode.
 */
 
 if(
 navigationActive
 ){
 
-navigationFollowMode=
-true;
+navigationFollowMode=true;
 
 }
 
-
 let target=null;
 
-
-if(navigationMarker){
+if(
+navigationMarker
+){
 
 target=
 navigationMarker.getLatLng();
 
-}
-else if(
+}else if(
 lastKnownNavigationPosition
 ){
 
 target=
 lastKnownNavigationPosition;
 
-}
-else if(
+}else if(
 source
 ){
 
-target=
-source;
+target=source;
 
 }
 
-
-if(target){
+if(
+target
+){
 
 map.setView(
 [
@@ -974,7 +795,6 @@ animate:true
 
 }
 
-
 if(
 !navigator.geolocation
 ){
@@ -982,11 +802,6 @@ if(
 return;
 
 }
-
-
-/*
-Get an immediate fresh GPS position.
-*/
 
 navigator.geolocation.getCurrentPosition(
 
@@ -1000,21 +815,18 @@ lng:
 position.coords.longitude
 };
 
-
-source=
-current;
-
+source=current;
 
 lastKnownNavigationPosition=
 current;
-
 
 createNavigationMarker(
 current
 );
 
-
-if(sourceMarker){
+if(
+sourceMarker
+){
 
 sourceMarker.setLatLng([
 current.lat,
@@ -1022,23 +834,6 @@ current.lng
 ]);
 
 }
-
-
-/*
-If navigation is running,
-also trim the travelled route.
-*/
-
-if(
-navigationActive
-){
-
-trimNavigationRoute(
-current
-);
-
-}
-
 
 map.setView(
 [
@@ -1066,13 +861,9 @@ error
 },
 
 {
-
 enableHighAccuracy:true,
-
 timeout:10000,
-
 maximumAge:2000
-
 }
 
 );
@@ -1096,34 +887,27 @@ return;
 
 }
 
-
 const button=
 document.createElement(
 "button"
 );
 
-
 button.id=
 "recenterMapBtn";
-
 
 button.type=
 "button";
 
-
 button.innerHTML=
 "◉&nbsp; Re-center";
 
-
 button.title=
 "Center map on my current location";
-
 
 button.setAttribute(
 "aria-label",
 "Center map on my current location"
 );
-
 
 button.style.cssText=`
 position:fixed;
@@ -1144,7 +928,6 @@ backdrop-filter:blur(8px);
 transition:top .2s ease;
 `;
 
-
 button.addEventListener(
 "click",
 function(event){
@@ -1157,7 +940,6 @@ recenterMap();
 
 }
 );
-
 
 document.body.appendChild(
 button
@@ -1177,7 +959,6 @@ document.getElementById(
 "recenterMapBtn"
 );
 
-
 if(
 !recenterButton
 ){
@@ -1186,12 +967,10 @@ return;
 
 }
 
-
 const layersControl=
 document.querySelector(
 ".leaflet-control-layers"
 );
-
 
 if(
 !layersControl
@@ -1201,12 +980,10 @@ return;
 
 }
 
-
 function updateRecenterPosition(){
 
 const rect=
 layersControl.getBoundingClientRect();
-
 
 if(
 !rect
@@ -1216,15 +993,12 @@ return;
 
 }
 
-
 recenterButton.style.top=
 (rect.bottom+10)+"px";
 
 }
 
-
 updateRecenterPosition();
-
 
 const observer=
 new MutationObserver(
@@ -1237,7 +1011,6 @@ updateRecenterPosition
 }
 );
 
-
 observer.observe(
 layersControl,
 {
@@ -1249,7 +1022,6 @@ attributeFilter:[
 }
 );
 
-
 window.addEventListener(
 "resize",
 updateRecenterPosition
@@ -1258,14 +1030,9 @@ updateRecenterPosition
 }
 
 
-/* =========================================================
-INITIALIZE RE-CENTER BUTTON
-========================================================= */
-
 function initializeRecenterButton(){
 
 createRecenterButton();
-
 
 setTimeout(
 setupLayersRecenterPosition,
@@ -1273,7 +1040,6 @@ setupLayersRecenterPosition,
 );
 
 }
-
 
 if(
 document.readyState===
@@ -1285,13 +1051,11 @@ document.addEventListener(
 initializeRecenterButton
 );
 
-}
-else{
+}else{
 
 initializeRecenterButton();
 
 }
-
 
 window.recenterMap=
 recenterMap;
@@ -1303,9 +1067,7 @@ AQI
 
 function getAQIColor(aqi){
 
-aqi=
-Number(aqi);
-
+aqi=Number(aqi);
 
 if(
 !Number.isFinite(aqi)
@@ -1314,7 +1076,6 @@ if(
 aqi=0;
 
 }
-
 
 if(
 aqi<=50
@@ -1324,7 +1085,6 @@ return"#00e400";
 
 }
 
-
 if(
 aqi<=100
 ){
@@ -1332,7 +1092,6 @@ aqi<=100
 return"#ffff00";
 
 }
-
 
 if(
 aqi<=200
@@ -1342,7 +1101,6 @@ return"#ff7e00";
 
 }
 
-
 if(
 aqi<=300
 ){
@@ -1350,7 +1108,6 @@ aqi<=300
 return"#ff0000";
 
 }
-
 
 if(
 aqi<=400
@@ -1360,7 +1117,6 @@ return"#8f3f97";
 
 }
 
-
 return"#7e0023";
 
 }
@@ -1368,9 +1124,7 @@ return"#7e0023";
 
 function getAQICategory(aqi){
 
-aqi=
-Number(aqi);
-
+aqi=Number(aqi);
 
 if(
 !Number.isFinite(aqi)
@@ -1380,7 +1134,6 @@ aqi=0;
 
 }
 
-
 if(
 aqi<=50
 ){
@@ -1388,7 +1141,6 @@ aqi<=50
 return"Good";
 
 }
-
 
 if(
 aqi<=100
@@ -1398,7 +1150,6 @@ return"Satisfactory";
 
 }
 
-
 if(
 aqi<=200
 ){
@@ -1406,7 +1157,6 @@ aqi<=200
 return"Moderate";
 
 }
-
 
 if(
 aqi<=300
@@ -1416,7 +1166,6 @@ return"Poor";
 
 }
 
-
 if(
 aqi<=400
 ){
@@ -1424,7 +1173,6 @@ aqi<=400
 return"Very Poor";
 
 }
-
 
 return"Severe";
 
@@ -1467,14 +1215,9 @@ return;
 
 }
 
+userSelectedRoute=true;
 
-userSelectedRoute=
-true;
-
-
-selectedRoute=
-index;
-
+selectedRoute=index;
 
 routePolylines.forEach(
 function(polyline,i){
@@ -1495,14 +1238,12 @@ alternateRoutesLayer
 
 }
 
-
 polyline.setStyle({
 weight:10,
 opacity:1
 });
 
-}
-else{
+}else{
 
 if(
 alternateRoutesLayer.hasLayer(
@@ -1521,18 +1262,15 @@ polyline
 }
 );
 
-
 renderRouteCards();
 
 showRouteSummary(
 index
 );
 
-
 loadRouteSegments(
 index
 );
-
 
 if(
 navigationActive&&
@@ -1544,7 +1282,6 @@ routeResults[index].routeCoords
 );
 
 }
-
 
 if(
 typeof map!=="undefined"&&
@@ -1579,12 +1316,10 @@ return;
 
 }
 
-
 const loadingOverlay=
 document.getElementById(
 "loadingOverlay"
 );
-
 
 if(
 loadingOverlay
@@ -1595,7 +1330,6 @@ loadingOverlay.style.display=
 
 }
 
-
 try{
 
 const url=
@@ -1604,12 +1338,8 @@ const url=
 `${destination.lng},${destination.lat}`+
 "?overview=full&geometries=geojson&alternatives=true";
 
-
 const response=
-await fetch(
-url
-);
-
+await fetch(url);
 
 if(
 !response.ok
@@ -1622,10 +1352,8 @@ response.status
 
 }
 
-
 const data=
 await response.json();
-
 
 if(
 !data.routes||
@@ -1640,10 +1368,8 @@ return;
 
 }
 
-
 const routes=
 data.routes;
-
 
 routeResults=[];
 
@@ -1657,34 +1383,28 @@ selectedRoute=0;
 
 userSelectedRoute=false;
 
-
 alternateRoutesLayer.clearLayers();
 
 routeSegmentsLayer.clearLayers();
-
 
 const routeInfo=
 document.getElementById(
 "routeInfo"
 );
 
-
 if(
 routeInfo
 ){
 
-routeInfo.innerHTML=
-"";
+routeInfo.innerHTML="";
 
 }
-
 
 const routeColors=[
 "blue",
 "green",
 "purple"
 ];
-
 
 routes.forEach(
 function(route,index){
@@ -1701,7 +1421,6 @@ coordinate[0]
 }
 );
 
-
 const polyline=
 L.polyline(
 routeLatLngs,
@@ -1715,31 +1434,25 @@ opacity:0.7
 }
 );
 
-
 polyline.addTo(
 alternateRoutesLayer
 );
-
 
 routePolylines.push(
 polyline
 );
 
-
 polyline.on(
 "click",
 function(){
 
-selectRoute(
-index
-);
+selectRoute(index);
 
 }
 );
 
 }
 );
-
 
 const routePromises=
 routes.map(
@@ -1757,10 +1470,8 @@ coordinate[0]
 }
 );
 
-
 const mins=
 (route.duration/60).toFixed(1);
-
 
 let aqiData={
 average_aqi:0,
@@ -1769,11 +1480,9 @@ exposure_score:0,
 category:"Unknown"
 };
 
-
 let futureAQI={
 average_aqi:null
 };
-
 
 try{
 
@@ -1796,7 +1505,6 @@ parseFloat(mins)
 }
 );
 
-
 if(
 response.ok
 ){
@@ -1804,20 +1512,17 @@ response.ok
 const result=
 await response.json();
 
-
 if(
 result
 ){
 
-aqiData=
-result;
+aqiData=result;
 
 }
 
 }
 
-}
-catch(error){
+}catch(error){
 
 console.warn(
 "Current AQI unavailable:",
@@ -1825,7 +1530,6 @@ error
 );
 
 }
-
 
 try{
 
@@ -1848,7 +1552,6 @@ parseFloat(mins)
 }
 );
 
-
 if(
 response.ok
 ){
@@ -1856,20 +1559,17 @@ response.ok
 const result=
 await response.json();
 
-
 if(
 result
 ){
 
-futureAQI=
-result;
+futureAQI=result;
 
 }
 
 }
 
-}
-catch(error){
+}catch(error){
 
 console.warn(
 "Future AQI unavailable:",
@@ -1878,24 +1578,20 @@ error
 
 }
 
-
 const averageAQI=
 Number(
 aqiData.average_aqi
 );
-
 
 const maxAQI=
 Number(
 aqiData.max_aqi
 );
 
-
 const exposure=
 Number(
 aqiData.exposure_score
 );
-
 
 return{
 
@@ -1912,28 +1608,22 @@ averageAQI:
 Number.isFinite(
 averageAQI
 )
-?
-averageAQI
-:
-0,
+?averageAQI
+:0,
 
 maxAQI:
 Number.isFinite(
 maxAQI
 )
-?
-maxAQI
-:
-0,
+?maxAQI
+:0,
 
 exposure:
 Number.isFinite(
 exposure
 )
-?
-exposure
-:
-0,
+?exposure
+:0,
 
 category:
 aqiData.category||
@@ -1955,12 +1645,10 @@ route
 }
 );
 
-
 routeResults=
 await Promise.all(
 routePromises
 );
-
 
 if(
 routeResults.length>0
@@ -1969,7 +1657,6 @@ routeResults.length>0
 recommendedIndex=0;
 
 fastestIndex=0;
-
 
 routeResults.forEach(
 function(route,index){
@@ -1985,7 +1672,6 @@ recommendedIndex=
 index;
 
 }
-
 
 if(
 parseFloat(route.time)<
@@ -2006,9 +1692,7 @@ index;
 
 }
 
-
 renderRouteCards();
-
 
 if(
 recommendedIndex>=0&&
@@ -2020,7 +1704,6 @@ recommendedIndex
 selectedRoute=
 recommendedIndex;
 
-
 routePolylines[
 recommendedIndex
 ].setStyle({
@@ -2028,18 +1711,15 @@ weight:10,
 opacity:1
 });
 
-
 showRouteSummary(
 recommendedIndex
 );
-
 
 loadRouteSegments(
 recommendedIndex
 );
 
 }
-
 
 if(
 routePolylines.length>0
@@ -2049,7 +1729,6 @@ const bounds=
 L.featureGroup(
 routePolylines
 ).getBounds();
-
 
 if(
 bounds.isValid()
@@ -2066,33 +1745,22 @@ padding:[30,30]
 
 }
 
-
 closeSidebarAfterRoute();
-
-
-/*
-Start continuous navigation after
-the route has been calculated.
-*/
 
 startNavigation();
 
-
-}
-catch(error){
+}catch(error){
 
 console.error(
 "Route request failed:",
 error
 );
 
-
 alert(
 "Route request failed"
 );
 
-}
-finally{
+}finally{
 
 if(
 loadingOverlay
@@ -2124,16 +1792,13 @@ return;
 
 }
 
-
 const style=
 document.createElement(
 "style"
 );
 
-
 style.id=
 "routeSummaryProfessionalStyles";
-
 
 style.textContent=`
 
@@ -2273,7 +1938,9 @@ font-weight:750;
 
 cursor:pointer;
 
-transition:background .18s ease,transform .18s ease;
+transition:
+background .18s ease,
+transform .18s ease;
 
 }
 
@@ -2526,12 +2193,10 @@ function setupRouteSummaryControls(){
 
 injectRouteSummaryStyles();
 
-
 const routeSummary=
 document.getElementById(
 "routeSummary"
 );
-
 
 if(
 !routeSummary
@@ -2541,12 +2206,10 @@ return;
 
 }
 
-
 let minimizeButton=
 document.getElementById(
 "routeSummaryMinimizeBtn"
 );
-
 
 if(
 !minimizeButton
@@ -2557,28 +2220,22 @@ document.createElement(
 "button"
 );
 
-
 minimizeButton.id=
 "routeSummaryMinimizeBtn";
-
 
 minimizeButton.type=
 "button";
 
-
 minimizeButton.title=
 "Minimize route summary";
-
 
 minimizeButton.setAttribute(
 "aria-label",
 "Minimize route summary"
 );
 
-
 minimizeButton.textContent=
 "−";
-
 
 minimizeButton.addEventListener(
 "click",
@@ -2593,19 +2250,16 @@ minimizeRouteSummary();
 }
 );
 
-
 routeSummary.appendChild(
 minimizeButton
 );
 
 }
 
-
 let restoreButton=
 document.getElementById(
 "routeSummaryRestoreBtn"
 );
-
 
 if(
 !restoreButton
@@ -2616,28 +2270,22 @@ document.createElement(
 "button"
 );
 
-
 restoreButton.id=
 "routeSummaryRestoreBtn";
-
 
 restoreButton.type=
 "button";
 
-
 restoreButton.title=
 "Open route summary";
-
 
 restoreButton.setAttribute(
 "aria-label",
 "Open route summary"
 );
 
-
 restoreButton.textContent=
 "Route Summary";
-
 
 restoreButton.addEventListener(
 "click",
@@ -2651,7 +2299,6 @@ restoreRouteSummary();
 
 }
 );
-
 
 document.body.appendChild(
 restoreButton
@@ -2669,12 +2316,10 @@ document.getElementById(
 "routeSummary"
 );
 
-
 const restoreButton=
 document.getElementById(
 "routeSummaryRestoreBtn"
 );
-
 
 if(
 !routeSummary
@@ -2684,17 +2329,13 @@ return;
 
 }
 
-
-routeSummaryMinimized=
-true;
-
+routeSummaryMinimized=true;
 
 routeSummary.style.setProperty(
 "display",
 "none",
 "important"
 );
-
 
 if(
 restoreButton
@@ -2718,12 +2359,10 @@ document.getElementById(
 "routeSummary"
 );
 
-
 const restoreButton=
 document.getElementById(
 "routeSummaryRestoreBtn"
 );
-
 
 if(
 !routeSummary
@@ -2733,17 +2372,13 @@ return;
 
 }
 
-
-routeSummaryMinimized=
-false;
-
+routeSummaryMinimized=false;
 
 routeSummary.style.setProperty(
 "display",
 "block",
 "important"
 );
-
 
 if(
 restoreButton
@@ -2770,22 +2405,18 @@ return;
 
 }
 
-
 const route=
 routeResults[index];
-
 
 const aqi=
 Number(
 route.averageAQI
 );
 
-
 const maxAQI=
 Number(
 route.maxAQI
 );
-
 
 const category=
 route.category||
@@ -2793,18 +2424,15 @@ getAQICategory(
 aqi
 );
 
-
 const summaryContent=
 document.getElementById(
 "summaryContent"
 );
 
-
 const routeSummary=
 document.getElementById(
 "routeSummary"
 );
-
 
 if(
 !summaryContent||
@@ -2814,7 +2442,6 @@ if(
 return;
 
 }
-
 
 summaryContent.innerHTML=
 "<div class='summary-row'>"+
@@ -2858,13 +2485,9 @@ category+
 "View Details"+
 "</button>";
 
-
 setupRouteSummaryControls();
 
-
-routeSummaryMinimized=
-false;
-
+routeSummaryMinimized=false;
 
 routeSummary.style.setProperty(
 "display",
@@ -2872,12 +2495,10 @@ routeSummary.style.setProperty(
 "important"
 );
 
-
 const restoreButton=
 document.getElementById(
 "routeSummaryRestoreBtn"
 );
-
 
 if(
 restoreButton
@@ -2891,12 +2512,10 @@ restoreButton.style.setProperty(
 
 }
 
-
 const detailsBtn=
 document.getElementById(
 "detailsBtn"
 );
-
 
 if(
 !detailsBtn
@@ -2906,7 +2525,6 @@ return;
 
 }
 
-
 detailsBtn.onclick=
 function(){
 
@@ -2915,12 +2533,10 @@ document.getElementById(
 "detailsModal"
 );
 
-
 const detailsContent=
 document.getElementById(
 "detailsContent"
 );
-
 
 if(
 !modal||
@@ -2931,21 +2547,17 @@ return;
 
 }
 
-
 modal.style.display=
 "block";
-
 
 const futureAQI=
 route.futureAQI||
 {};
 
-
 const futureAverageAQI=
 Number(
 futureAQI.average_aqi
 );
-
 
 detailsContent.innerHTML=`
 
@@ -2985,9 +2597,7 @@ ${Math.round(maxAQI)}
 <div class="detailRow">
 <span>Exposure</span>
 <b>
-${Math.round(
-Number(route.exposure)||0
-)}
+${Math.round(Number(route.exposure)||0)}
 </b>
 </div>
 
@@ -2998,12 +2608,10 @@ ${
 Number.isFinite(
 futureAverageAQI
 )
-?
-Math.round(
+?Math.round(
 futureAverageAQI
 )
-:
-"N/A"
+:"N/A"
 }
 </b>
 </div>
@@ -3029,12 +2637,10 @@ ${getHealthAdvice(category)}
 
 
 /* =========================================================
-LOAD ROUTE SEGMENTS
+ROUTE SEGMENTS
 ========================================================= */
 
-async function loadRouteSegments(
-index
-){
+async function loadRouteSegments(index){
 
 if(
 !routeResults[index]
@@ -3044,14 +2650,11 @@ return;
 
 }
 
-
 const route=
 routeResults[index];
 
-
 const routeCoords=
 route.routeCoords;
-
 
 if(
 !routeCoords||
@@ -3061,7 +2664,6 @@ routeCoords.length<2
 return;
 
 }
-
 
 try{
 
@@ -3082,7 +2684,6 @@ routeCoords
 }
 );
 
-
 if(
 !response.ok
 ){
@@ -3091,22 +2692,17 @@ return;
 
 }
 
-
 const segmentData=
 await response.json();
 
-
 if(
-!Array.isArray(
-segmentData
-)||
+!Array.isArray(segmentData)||
 segmentData.length<2
 ){
 
 return;
 
 }
-
 
 if(
 index!==selectedRoute
@@ -3116,9 +2712,7 @@ return;
 
 }
 
-
 routeSegmentsLayer.clearLayers();
-
 
 for(
 let i=0;
@@ -3129,16 +2723,20 @@ i++
 const p1=
 segmentData[i];
 
-
 const p2=
 segmentData[i+1];
-
 
 const segment=
 L.polyline(
 [
-[p1.lat,p1.lon],
-[p2.lat,p2.lon]
+[
+p1.lat,
+p1.lon
+],
+[
+p2.lat,
+p2.lon
+]
 ],
 {
 color:
@@ -3150,7 +2748,6 @@ opacity:1
 }
 );
 
-
 segment.bindPopup(
 "<b>Segment AQI</b><br>"+
 "AQI: "+
@@ -3159,15 +2756,13 @@ Number(p1.aqi)
 )
 );
 
-
 routeSegmentsLayer.addLayer(
 segment
 );
 
 }
 
-}
-catch(error){
+}catch(error){
 
 console.error(
 "Route segment error:",
@@ -3180,12 +2775,10 @@ error
 
 
 /* =========================================================
-GEOCODE
+GEOCODING
 ========================================================= */
 
-async function geocode(
-place
-){
+async function geocode(place){
 
 const url=
 "/geocode?q="+
@@ -3193,12 +2786,10 @@ encodeURIComponent(
 place
 );
 
-
 const response=
 await fetch(
 url
 );
-
 
 if(
 !response.ok
@@ -3211,10 +2802,8 @@ response.status
 
 }
 
-
 const data=
 await response.json();
-
 
 if(
 !Array.isArray(data)||
@@ -3227,18 +2816,15 @@ throw new Error(
 
 }
 
-
 const lat=
 parseFloat(
 data[0].lat
 );
 
-
 const lng=
 parseFloat(
 data[0].lon
 );
-
 
 if(
 !Number.isFinite(lat)||
@@ -3250,7 +2836,6 @@ throw new Error(
 );
 
 }
-
 
 return{
 lat:lat,
@@ -3268,30 +2853,23 @@ async function findRoute(){
 
 try{
 
-userSelectedRoute=
-false;
+userSelectedRoute=false;
 
-recommendedIndex=
--1;
+recommendedIndex=-1;
 
-fastestIndex=
--1;
+fastestIndex=-1;
 
-selectedRoute=
-0;
-
+selectedRoute=0;
 
 const sourceInput=
 document.getElementById(
 "sourceInput"
 );
 
-
 const destinationInput=
 document.getElementById(
 "destinationInput"
 );
-
 
 if(
 !sourceInput||
@@ -3302,10 +2880,8 @@ return;
 
 }
 
-
 const destinationText=
 destinationInput.value.trim();
-
 
 if(
 !destinationText
@@ -3319,12 +2895,10 @@ return;
 
 }
 
-
 const loadingOverlay=
 document.getElementById(
 "loadingOverlay"
 );
-
 
 if(
 loadingOverlay
@@ -3335,13 +2909,9 @@ loadingOverlay.style.display=
 
 }
 
-
 const position=
 await new Promise(
-function(
-resolve,
-reject
-){
+function(resolve,reject){
 
 if(
 !navigator.geolocation
@@ -3357,7 +2927,6 @@ return;
 
 }
 
-
 navigator.geolocation.getCurrentPosition(
 resolve,
 reject,
@@ -3371,22 +2940,18 @@ maximumAge:0
 }
 );
 
-
 source={
 lat:
 position.coords.latitude,
-
 lng:
 position.coords.longitude
 };
-
 
 destination=
 await geocode(
 destinationText
 );
 
-
 if(
 sourceMarker
 ){
@@ -3395,11 +2960,9 @@ map.removeLayer(
 sourceMarker
 );
 
-sourceMarker=
-null;
+sourceMarker=null;
 
 }
-
 
 if(
 destinationMarker
@@ -3409,49 +2972,45 @@ map.removeLayer(
 destinationMarker
 );
 
-destinationMarker=
-null;
+destinationMarker=null;
 
 }
-
 
 sourceMarker=
 L.marker(
 source
 )
-.addTo(map)
+.addTo(
+map
+)
 .bindPopup(
 "Source"
 );
-
 
 destinationMarker=
 L.marker(
 destination
 )
-.addTo(map)
+.addTo(
+map
+)
 .bindPopup(
 "Destination"
 );
 
-
 await drawRoute();
 
-
-}
-catch(error){
+}catch(error){
 
 console.error(
 "Find route error:",
 error
 );
 
-
 const loadingOverlay=
 document.getElementById(
 "loadingOverlay"
 );
-
 
 if(
 loadingOverlay
@@ -3462,7 +3021,6 @@ loadingOverlay.style.display=
 
 }
 
-
 if(
 error&&
 error.code===1
@@ -3472,8 +3030,7 @@ alert(
 "Please allow location access to get your current location"
 );
 
-}
-else if(
+}else if(
 error&&
 error.code===2
 ){
@@ -3482,8 +3039,7 @@ alert(
 "Unable to get your current location"
 );
 
-}
-else if(
+}else if(
 error&&
 error.code===3
 ){
@@ -3492,8 +3048,7 @@ alert(
 "Location request timed out"
 );
 
-}
-else{
+}else{
 
 alert(
 "Location not found"
@@ -3516,7 +3071,6 @@ stopNavigation(
 false
 );
 
-
 if(
 sourceMarker
 ){
@@ -3525,11 +3079,9 @@ map.removeLayer(
 sourceMarker
 );
 
-sourceMarker=
-null;
+sourceMarker=null;
 
 }
-
 
 if(
 destinationMarker
@@ -3539,45 +3091,34 @@ map.removeLayer(
 destinationMarker
 );
 
-destinationMarker=
-null;
+destinationMarker=null;
 
 }
-
 
 alternateRoutesLayer.clearLayers();
 
 routeSegmentsLayer.clearLayers();
 
+source=null;
 
-source=
-null;
-
-destination=
-null;
+destination=null;
 
 routeResults=[];
 
 routePolylines=[];
 
-userSelectedRoute=
-false;
+userSelectedRoute=false;
 
-recommendedIndex=
--1;
+recommendedIndex=-1;
 
-fastestIndex=
--1;
+fastestIndex=-1;
 
-selectedRoute=
-0;
-
+selectedRoute=0;
 
 const routeInfo=
 document.getElementById(
 "routeInfo"
 );
-
 
 if(
 routeInfo
@@ -3588,12 +3129,10 @@ routeInfo.innerHTML=
 
 }
 
-
 const routeSummary=
 document.getElementById(
 "routeSummary"
 );
-
 
 if(
 routeSummary
@@ -3607,16 +3146,12 @@ routeSummary.style.setProperty(
 
 }
 
-
-routeSummaryMinimized=
-false;
-
+routeSummaryMinimized=false;
 
 const restoreButton=
 document.getElementById(
 "routeSummaryRestoreBtn"
 );
-
 
 if(
 restoreButton
@@ -3630,12 +3165,10 @@ restoreButton.style.setProperty(
 
 }
 
-
 const detailsModal=
 document.getElementById(
 "detailsModal"
 );
-
 
 if(
 detailsModal
@@ -3645,7 +3178,6 @@ detailsModal.style.display=
 "none";
 
 }
-
 
 if(
 window.innerWidth<=800&&
@@ -3663,9 +3195,7 @@ openMobileSidebar();
 HEALTH ADVICE
 ========================================================= */
 
-function getHealthAdvice(
-category
-){
+function getHealthAdvice(category){
 
 switch(category){
 
@@ -3678,7 +3208,6 @@ return(
 "Safe for everyone."
 );
 
-
 case"Satisfactory":
 
 return(
@@ -3687,7 +3216,6 @@ return(
 "Air quality is acceptable. "+
 "Normal outdoor activities."
 );
-
 
 case"Moderate":
 
@@ -3699,7 +3227,6 @@ return(
 "N95 mask recommended."
 );
 
-
 case"Poor":
 
 return(
@@ -3708,7 +3235,6 @@ return(
 "Reduce outdoor exposure. "+
 "N95 mask recommended."
 );
-
 
 case"Very Poor":
 
@@ -3719,7 +3245,6 @@ return(
 "Stay indoors whenever possible."
 );
 
-
 case"Severe":
 
 return(
@@ -3728,7 +3253,6 @@ return(
 "Hazardous air quality. "+
 "Avoid going outdoors."
 );
-
 
 default:
 
@@ -3750,7 +3274,6 @@ document.getElementById(
 "routeInfo"
 );
 
-
 if(
 !routeInfo
 ){
@@ -3759,80 +3282,61 @@ return;
 
 }
 
-
 let html="";
 
-
 routeResults.forEach(
-function(
-route,
-index
-){
+function(route,index){
 
 let badge=
 "Alternative Route";
 
-
 let badgeColor=
 "#757575";
-
 
 if(
 index===recommendedIndex
 ){
 
-badge=
-"Recommended";
+badge="Recommended";
 
 badgeColor=
 "#2E7D32";
 
-}
-else if(
+}else if(
 index===fastestIndex
 ){
 
-badge=
-"Fastest";
+badge="Fastest";
 
 badgeColor=
 "#1565C0";
 
 }
 
-
 const aqiValue=
 Number(
 route.averageAQI
 );
 
-
 const safeAQI=
 Number.isFinite(
 aqiValue
 )
-?
-aqiValue
-:
-0;
-
+?aqiValue
+:0;
 
 const aqiColor=
 getAQIColor(
 safeAQI
 );
 
-
 const aqiText=
 getAQICategory(
 safeAQI
 );
 
-
 const isActive=
-selectedRoute===
-index;
-
+selectedRoute===index;
 
 html+=`
 
@@ -3852,11 +3356,8 @@ style="
 background:${badgeColor};
 "
 >
-
 ${badge}
-
 </div>
-
 
 <div
 class="aqiBadge"
@@ -3864,59 +3365,42 @@ style="
 background:${aqiColor};
 "
 >
-
 AQI
 ${Math.round(safeAQI)}
-
 </div>
-
 
 <div class="aqiText">
-
 ${aqiText}
-
 </div>
-
 
 <div class="routeMeta">
-
 ${route.distance} km
-
 &nbsp;&nbsp;
-
 ${route.time} mins
-
 </div>
 
-
 <div class="routeExposure">
-
 Exposure
-
 ${Math.round(
 Number(route.exposure)||0
 )}
-
 </div>
-
 
 </div>
 
 `;
 
 }
-);
 
+);
 
 routeInfo.innerHTML=
 html;
-
 
 const closeModal=
 document.getElementById(
 "closeModal"
 );
-
 
 if(
 closeModal
@@ -3929,7 +3413,6 @@ const modal=
 document.getElementById(
 "detailsModal"
 );
-
 
 if(
 modal
@@ -3948,7 +3431,7 @@ modal.style.display=
 
 
 /* =========================================================
-CLOSE DETAILS MODAL
+MODAL CLOSE
 ========================================================= */
 
 window.addEventListener(
@@ -3959,7 +3442,6 @@ const modal=
 document.getElementById(
 "detailsModal"
 );
-
 
 if(
 modal&&
