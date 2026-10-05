@@ -357,28 +357,119 @@ function trimNavigationRoute(
    VOICE NAVIGATION
 ========================================================= */
 
-const NAVIGATION_VOICE_ENABLED=true;
 const NAVIGATION_VOICE_LANGUAGE="en-IN";
-
-const NAVIGATION_VOICE_DISTANCES=[
-    500,
-    200,
-    50
-];
+let navigationVoiceEnabled=true;
 
 let navigationVoiceSteps=[];
 let navigationVoiceStepIndex=0;
 let navigationVoiceAnnounced={};
+let navigationVoiceControl=null;
 
 
 /* =========================================================
    VOICE SPEAK
 ========================================================= */
 
+function getMaleNavigationVoice(){
+
+    if(
+        !("speechSynthesis" in window)
+    ){
+
+        return null;
+    }
+
+    const voices=
+        window.speechSynthesis.getVoices();
+
+    if(
+        !voices||
+        voices.length===0
+    ){
+
+        return null;
+    }
+
+    const englishIndiaVoices=
+        voices.filter(
+            function(voice){
+
+                return(
+                    voice.lang&&
+                    (
+                        voice.lang.toLowerCase()==="en-in"||
+                        voice.lang.toLowerCase().startsWith("en-in-")
+                    )
+                );
+            }
+        );
+
+    const englishVoices=
+        voices.filter(
+            function(voice){
+
+                return(
+                    voice.lang&&
+                    voice.lang.toLowerCase().startsWith("en")
+                );
+            }
+        );
+
+    const maleWords=[
+        "male",
+        "man",
+        "david",
+        "mark",
+        "daniel",
+        "ravi",
+        "prabhat",
+        "rishi",
+        "microsoft david",
+        "microsoft mark"
+    ];
+
+    function findMaleVoice(
+        voiceList
+    ){
+
+        return voiceList.find(
+            function(voice){
+
+                const name=
+                    String(
+                        voice.name||""
+                    ).toLowerCase();
+
+                return maleWords.some(
+                    function(word){
+
+                        return name.includes(
+                            word
+                        );
+                    }
+                );
+            }
+        );
+    }
+
+    return(
+        findMaleVoice(
+            englishIndiaVoices
+        )||
+        findMaleVoice(
+            englishVoices
+        )||
+        englishIndiaVoices[0]||
+        englishVoices[0]||
+        voices[0]
+    );
+}
+
+
 function navigationSpeak(text){
 
     if(
-        !NAVIGATION_VOICE_ENABLED||
+        !navigationVoiceEnabled||
         !("speechSynthesis" in window)
     ){
 
@@ -395,14 +486,22 @@ function navigationSpeak(text){
     utterance.lang=
         NAVIGATION_VOICE_LANGUAGE;
 
-    utterance.rate=
-        0.95;
+    const maleVoice=
+        getMaleNavigationVoice();
 
-    utterance.pitch=
-        1.0;
+    if(maleVoice){
 
-    utterance.volume=
-        1.0;
+        utterance.voice=
+            maleVoice;
+
+        utterance.lang=
+            maleVoice.lang||
+            NAVIGATION_VOICE_LANGUAGE;
+    }
+
+    utterance.rate=.95;
+    utterance.pitch=.85;
+    utterance.volume=1;
 
     window.speechSynthesis.speak(
         utterance
@@ -411,7 +510,145 @@ function navigationSpeak(text){
 
 
 /* =========================================================
-   FORMAT NAVIGATION DISTANCE
+   MUTE / UNMUTE VOICE BUTTON
+========================================================= */
+
+if(
+    "speechSynthesis" in window
+){
+
+    window.speechSynthesis.addEventListener(
+        "voiceschanged",
+        function(){
+
+            getMaleNavigationVoice();
+        }
+    );
+}
+
+
+function initializeNavigationVoiceControl(){
+
+    if(
+        navigationVoiceControl||
+        document.getElementById(
+            "navigationVoiceControl"
+        )
+    ){
+
+        return;
+    }
+
+    navigationVoiceControl=
+        document.createElement("button");
+
+    navigationVoiceControl.id=
+        "navigationVoiceControl";
+
+    navigationVoiceControl.type=
+        "button";
+
+    navigationVoiceControl.innerHTML=
+        "🔊";
+
+    navigationVoiceControl.title=
+        "Mute navigation voice";
+
+    navigationVoiceControl.setAttribute(
+        "aria-label",
+        "Mute navigation voice"
+    );
+
+    navigationVoiceControl.style.cssText=`
+        position:fixed;
+        top:80px;
+        left:14px;
+        z-index:4500;
+        width:42px;
+        height:42px;
+        padding:0;
+        border:1px solid rgba(59,130,246,.55);
+        border-radius:10px;
+        background:rgba(5,15,30,.94);
+        color:#fff;
+        font-size:20px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        cursor:pointer;
+        box-shadow:0 5px 18px rgba(0,0,0,.35);
+        backdrop-filter:blur(8px);
+        -webkit-backdrop-filter:blur(8px);
+    `;
+
+    navigationVoiceControl.addEventListener(
+        "click",
+        function(event){
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            navigationVoiceEnabled=
+                !navigationVoiceEnabled;
+
+            if(
+                !navigationVoiceEnabled&&
+                "speechSynthesis" in window
+            ){
+
+                window.speechSynthesis.cancel();
+            }
+
+            updateNavigationVoiceControl();
+        }
+    );
+
+    document.body.appendChild(
+        navigationVoiceControl
+    );
+
+    updateNavigationVoiceControl();
+}
+
+
+function updateNavigationVoiceControl(){
+
+    if(!navigationVoiceControl){
+
+        return;
+    }
+
+    if(navigationVoiceEnabled){
+
+        navigationVoiceControl.innerHTML=
+            "🔊";
+
+        navigationVoiceControl.title=
+            "Mute navigation voice";
+
+        navigationVoiceControl.setAttribute(
+            "aria-label",
+            "Mute navigation voice"
+        );
+
+    }else{
+
+        navigationVoiceControl.innerHTML=
+            "🔇";
+
+        navigationVoiceControl.title=
+            "Unmute navigation voice";
+
+        navigationVoiceControl.setAttribute(
+            "aria-label",
+            "Unmute navigation voice"
+        );
+    }
+}
+
+
+/* =========================================================
+   FORMAT DISTANCE
 ========================================================= */
 
 function formatNavigationDistance(
@@ -422,7 +659,7 @@ function formatNavigationDistance(
 
         return(
             (meters/1000)
-            .toFixed(1)+
+                .toFixed(1)+
             " kilometers"
         );
     }
@@ -506,15 +743,11 @@ function getNavigationInstruction(
 
     if(type==="merge"){
 
-        if(modifier.includes("left")){
-
+        if(modifier.includes("left"))
             return"Merge left.";
-        }
 
-        if(modifier.includes("right")){
-
+        if(modifier.includes("right"))
             return"Merge right.";
-        }
 
         return"Merge.";
     }
@@ -525,75 +758,53 @@ function getNavigationInstruction(
         type==="ramp"
     ){
 
-        if(modifier.includes("left")){
-
+        if(modifier.includes("left"))
             return"Take the ramp on the left.";
-        }
 
-        if(modifier.includes("right")){
-
+        if(modifier.includes("right"))
             return"Take the ramp on the right.";
-        }
 
         return"Take the ramp.";
     }
 
     if(type==="fork"){
 
-        if(modifier.includes("left")){
-
+        if(modifier.includes("left"))
             return"Keep left at the fork.";
-        }
 
-        if(modifier.includes("right")){
-
+        if(modifier.includes("right"))
             return"Keep right at the fork.";
-        }
 
         return"Continue at the fork.";
     }
 
-    if(modifier==="sharp left"){
-
+    if(modifier==="sharp left")
         return"Turn sharp left.";
-    }
 
-    if(modifier==="sharp right"){
-
+    if(modifier==="sharp right")
         return"Turn sharp right.";
-    }
 
-    if(modifier==="slight left"){
-
+    if(modifier==="slight left")
         return"Turn slightly left.";
-    }
 
-    if(modifier==="slight right"){
-
+    if(modifier==="slight right")
         return"Turn slightly right.";
-    }
 
-    if(modifier==="left"){
-
+    if(modifier==="left")
         return"Turn left.";
-    }
 
-    if(modifier==="right"){
-
+    if(modifier==="right")
         return"Turn right.";
-    }
 
-    if(modifier==="straight"){
-
+    if(modifier==="straight")
         return"Continue straight.";
-    }
 
     return"Continue.";
 }
 
 
 /* =========================================================
-   BUILD VOICE STEPS FROM OSRM ROUTE
+   BUILD VOICE STEPS
 ========================================================= */
 
 function buildNavigationVoiceSteps(
@@ -617,7 +828,6 @@ function buildNavigationVoiceSteps(
         function(leg){
 
             if(
-                !leg.steps||
                 !Array.isArray(
                     leg.steps
                 )
@@ -637,21 +847,13 @@ function buildNavigationVoiceSteps(
                         return;
                     }
 
-                    const location=
-                        step.maneuver.location;
-
                     navigationVoiceSteps.push({
 
                         lat:
-                            location[1],
+                            step.maneuver.location[1],
 
                         lng:
-                            location[0],
-
-                        distance:
-                            Number(
-                                step.distance
-                            )||0,
+                            step.maneuver.location[0],
 
                         instruction:
                             getNavigationInstruction(
@@ -675,6 +877,7 @@ function updateNavigationVoice(
 
     if(
         !navigationActive||
+        !navigationVoiceEnabled||
         navigationVoiceSteps.length===0
     ){
 
@@ -711,8 +914,7 @@ function updateNavigationVoice(
                 !navigationVoiceAnnounced[key]
             ){
 
-                navigationVoiceAnnounced[key]=
-                    true;
+                navigationVoiceAnnounced[key]=true;
 
                 navigationSpeak(
                     step.instruction
@@ -724,25 +926,30 @@ function updateNavigationVoice(
             continue;
         }
 
+        const distances=[
+            500,
+            200,
+            50
+        ];
+
         for(
             let i=0;
-            i<NAVIGATION_VOICE_DISTANCES.length;
+            i<distances.length;
             i++
         ){
 
-            const leadDistance=
-                NAVIGATION_VOICE_DISTANCES[i];
+            const lead=
+                distances[i];
 
             const key=
-                stepId+"_"+leadDistance;
+                stepId+"_"+lead;
 
             if(
-                distance<=leadDistance&&
+                distance<=lead&&
                 !navigationVoiceAnnounced[key]
             ){
 
-                navigationVoiceAnnounced[key]=
-                    true;
+                navigationVoiceAnnounced[key]=true;
 
                 navigationSpeak(
                     step.instruction+
@@ -762,7 +969,7 @@ function updateNavigationVoice(
 
 
 /* =========================================================
-   RESET VOICE NAVIGATION
+   RESET VOICE
 ========================================================= */
 
 function resetNavigationVoice(){
@@ -936,10 +1143,6 @@ function updateNavigationPosition(
         currentPosition
     );
 
-    updateNavigationVoice(
-        currentPosition
-    );
-
     const distanceToDestination=
         getDistanceMeters(
             currentPosition.lat,
@@ -1030,15 +1233,6 @@ function startNavigation(){
     );
 
     if(
-        navigationWatchId!==null
-    ){
-
-        navigator.geolocation.clearWatch(
-            navigationWatchId
-        );
-    }
-
-    if(
         routeResults[selectedRoute]&&
         routeResults[selectedRoute].originalRoute
     ){
@@ -1051,6 +1245,15 @@ function startNavigation(){
     }
 
     announceNavigationStart();
+
+    if(
+        navigationWatchId!==null
+    ){
+
+        navigator.geolocation.clearWatch(
+            navigationWatchId
+        );
+    }
 
     navigationWatchId=
         navigator.geolocation.watchPosition(
@@ -1564,6 +1767,16 @@ function selectRoute(index){
     loadRouteSegments(index);
 
     if(
+        routeResults[index]&&
+        routeResults[index].originalRoute
+    ){
+
+        buildNavigationVoiceSteps(
+            routeResults[index].originalRoute
+        );
+    }
+
+    if(
         navigationActive&&
         routeResults[index].routeCoords
     ){
@@ -1989,12 +2202,6 @@ async function drawRoute(){
 
             loadRouteSegments(
                 recommendedIndex
-            );
-
-            buildNavigationVoiceSteps(
-                routeResults[
-                    recommendedIndex
-                ].originalRoute
             );
         }
 
@@ -4146,6 +4353,7 @@ function setupMobileMapRotation(){
 ========================================================= */
 
 injectRouteSummaryStyles();
+initializeNavigationVoiceControl();
 
 
 if(
