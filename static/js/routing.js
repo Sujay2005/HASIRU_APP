@@ -352,6 +352,446 @@ function trimNavigationRoute(
 }
 
 
+
+/* =========================================================
+   VOICE NAVIGATION
+========================================================= */
+
+const NAVIGATION_VOICE_ENABLED=true;
+const NAVIGATION_VOICE_LANGUAGE="en-IN";
+
+const NAVIGATION_VOICE_DISTANCES=[
+    500,
+    200,
+    50
+];
+
+let navigationVoiceSteps=[];
+let navigationVoiceStepIndex=0;
+let navigationVoiceAnnounced={};
+
+
+/* =========================================================
+   VOICE SPEAK
+========================================================= */
+
+function navigationSpeak(text){
+
+    if(
+        !NAVIGATION_VOICE_ENABLED||
+        !("speechSynthesis" in window)
+    ){
+
+        return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    const utterance=
+        new SpeechSynthesisUtterance(
+            text
+        );
+
+    utterance.lang=
+        NAVIGATION_VOICE_LANGUAGE;
+
+    utterance.rate=
+        0.95;
+
+    utterance.pitch=
+        1.0;
+
+    utterance.volume=
+        1.0;
+
+    window.speechSynthesis.speak(
+        utterance
+    );
+}
+
+
+/* =========================================================
+   FORMAT NAVIGATION DISTANCE
+========================================================= */
+
+function formatNavigationDistance(
+    meters
+){
+
+    if(meters>=1000){
+
+        return(
+            (meters/1000)
+            .toFixed(1)+
+            " kilometers"
+        );
+    }
+
+    if(meters>=100){
+
+        return(
+            Math.round(meters/50)*50+
+            " meters"
+        );
+    }
+
+    return(
+        Math.max(
+            10,
+            Math.round(meters/10)*10
+        )+
+        " meters"
+    );
+}
+
+
+/* =========================================================
+   TURN INSTRUCTION
+========================================================= */
+
+function getNavigationInstruction(
+    step
+){
+
+    if(
+        !step||
+        !step.maneuver
+    ){
+
+        return"Continue";
+    }
+
+    const maneuver=
+        step.maneuver;
+
+    const type=
+        maneuver.type||
+        "";
+
+    const modifier=
+        maneuver.modifier||
+        "";
+
+    if(type==="arrive"){
+
+        return"You have arrived at your destination.";
+    }
+
+    if(type==="depart"){
+
+        return"Start navigation.";
+    }
+
+    if(
+        type==="roundabout"||
+        type==="rotary"
+    ){
+
+        if(maneuver.exit){
+
+            return(
+                "Enter the roundabout and take "+
+                "exit number "+
+                maneuver.exit+"."
+            );
+        }
+
+        return"Enter the roundabout.";
+    }
+
+    if(type==="uturn"){
+
+        return"Make a U-turn.";
+    }
+
+    if(type==="merge"){
+
+        if(modifier.includes("left")){
+
+            return"Merge left.";
+        }
+
+        if(modifier.includes("right")){
+
+            return"Merge right.";
+        }
+
+        return"Merge.";
+    }
+
+    if(
+        type==="on ramp"||
+        type==="off ramp"||
+        type==="ramp"
+    ){
+
+        if(modifier.includes("left")){
+
+            return"Take the ramp on the left.";
+        }
+
+        if(modifier.includes("right")){
+
+            return"Take the ramp on the right.";
+        }
+
+        return"Take the ramp.";
+    }
+
+    if(type==="fork"){
+
+        if(modifier.includes("left")){
+
+            return"Keep left at the fork.";
+        }
+
+        if(modifier.includes("right")){
+
+            return"Keep right at the fork.";
+        }
+
+        return"Continue at the fork.";
+    }
+
+    if(modifier==="sharp left"){
+
+        return"Turn sharp left.";
+    }
+
+    if(modifier==="sharp right"){
+
+        return"Turn sharp right.";
+    }
+
+    if(modifier==="slight left"){
+
+        return"Turn slightly left.";
+    }
+
+    if(modifier==="slight right"){
+
+        return"Turn slightly right.";
+    }
+
+    if(modifier==="left"){
+
+        return"Turn left.";
+    }
+
+    if(modifier==="right"){
+
+        return"Turn right.";
+    }
+
+    if(modifier==="straight"){
+
+        return"Continue straight.";
+    }
+
+    return"Continue.";
+}
+
+
+/* =========================================================
+   BUILD VOICE STEPS FROM OSRM ROUTE
+========================================================= */
+
+function buildNavigationVoiceSteps(
+    route
+){
+
+    navigationVoiceSteps=[];
+    navigationVoiceStepIndex=0;
+    navigationVoiceAnnounced={};
+
+    if(
+        !route||
+        !route.legs||
+        !route.legs.length
+    ){
+
+        return;
+    }
+
+    route.legs.forEach(
+        function(leg){
+
+            if(
+                !leg.steps||
+                !Array.isArray(
+                    leg.steps
+                )
+            ){
+
+                return;
+            }
+
+            leg.steps.forEach(
+                function(step){
+
+                    if(
+                        !step.maneuver||
+                        !step.maneuver.location
+                    ){
+
+                        return;
+                    }
+
+                    const location=
+                        step.maneuver.location;
+
+                    navigationVoiceSteps.push({
+
+                        lat:
+                            location[1],
+
+                        lng:
+                            location[0],
+
+                        distance:
+                            Number(
+                                step.distance
+                            )||0,
+
+                        instruction:
+                            getNavigationInstruction(
+                                step
+                            )
+                    });
+                }
+            );
+        }
+    );
+}
+
+
+/* =========================================================
+   UPDATE VOICE GUIDANCE
+========================================================= */
+
+function updateNavigationVoice(
+    currentPosition
+){
+
+    if(
+        !navigationActive||
+        navigationVoiceSteps.length===0
+    ){
+
+        return;
+    }
+
+    while(
+        navigationVoiceStepIndex<
+        navigationVoiceSteps.length
+    ){
+
+        const step=
+            navigationVoiceSteps[
+                navigationVoiceStepIndex
+            ];
+
+        const distance=
+            getDistanceMeters(
+                currentPosition.lat,
+                currentPosition.lng,
+                step.lat,
+                step.lng
+            );
+
+        const stepId=
+            navigationVoiceStepIndex;
+
+        if(distance<=20){
+
+            const key=
+                stepId+"_now";
+
+            if(
+                !navigationVoiceAnnounced[key]
+            ){
+
+                navigationVoiceAnnounced[key]=
+                    true;
+
+                navigationSpeak(
+                    step.instruction
+                );
+            }
+
+            navigationVoiceStepIndex++;
+
+            continue;
+        }
+
+        for(
+            let i=0;
+            i<NAVIGATION_VOICE_DISTANCES.length;
+            i++
+        ){
+
+            const leadDistance=
+                NAVIGATION_VOICE_DISTANCES[i];
+
+            const key=
+                stepId+"_"+leadDistance;
+
+            if(
+                distance<=leadDistance&&
+                !navigationVoiceAnnounced[key]
+            ){
+
+                navigationVoiceAnnounced[key]=
+                    true;
+
+                navigationSpeak(
+                    step.instruction+
+                    " In "+
+                    formatNavigationDistance(
+                        distance
+                    )+"."
+                );
+
+                break;
+            }
+        }
+
+        break;
+    }
+}
+
+
+/* =========================================================
+   RESET VOICE NAVIGATION
+========================================================= */
+
+function resetNavigationVoice(){
+
+    navigationVoiceSteps=[];
+    navigationVoiceStepIndex=0;
+    navigationVoiceAnnounced={};
+
+    if(
+        "speechSynthesis" in window
+    ){
+
+        window.speechSynthesis.cancel();
+    }
+}
+
+
+/* =========================================================
+   START VOICE
+========================================================= */
+
+function announceNavigationStart(){
+
+    navigationSpeak(
+        "Navigation started."
+    );
+}
+
+
 /* =========================================================
    REROUTING
 ========================================================= */
@@ -386,7 +826,7 @@ async function rerouteNavigation(
         const url=
             "https://router.project-osrm.org/route/v1/driving/"+
             `${position.lng},${position.lat};${destination.lng},${destination.lat}`+
-            "?overview=full&geometries=geojson";
+            "?overview=full&geometries=geojson&steps=true";
 
         const response=
             await fetch(url);
@@ -496,6 +936,10 @@ function updateNavigationPosition(
         currentPosition
     );
 
+    updateNavigationVoice(
+        currentPosition
+    );
+
     const distanceToDestination=
         getDistanceMeters(
             currentPosition.lat,
@@ -594,6 +1038,20 @@ function startNavigation(){
         );
     }
 
+    if(
+        routeResults[selectedRoute]&&
+        routeResults[selectedRoute].originalRoute
+    ){
+
+        buildNavigationVoiceSteps(
+            routeResults[
+                selectedRoute
+            ].originalRoute
+        );
+    }
+
+    announceNavigationStart();
+
     navigationWatchId=
         navigator.geolocation.watchPosition(
             updateNavigationPosition,
@@ -658,6 +1116,8 @@ function stopNavigation(
 
     navigationRouteCoords=null;
     lastKnownNavigationPosition=null;
+
+    resetNavigationVoice();
 
     if(sourceMarker){
 
@@ -1160,7 +1620,7 @@ async function drawRoute(){
             "https://router.project-osrm.org/route/v1/driving/"+
             `${source.lng},${source.lat};`+
             `${destination.lng},${destination.lat}`+
-            "?overview=full&geometries=geojson&alternatives=true";
+            "?overview=full&geometries=geojson&steps=true&alternatives=true";
 
         const response=
             await fetch(url);
@@ -1529,6 +1989,12 @@ async function drawRoute(){
 
             loadRouteSegments(
                 recommendedIndex
+            );
+
+            buildNavigationVoiceSteps(
+                routeResults[
+                    recommendedIndex
+                ].originalRoute
             );
         }
 
@@ -3699,4 +4165,5 @@ if(
 }else{
 
     setupMobileMapRotation();
+    initializeSatelliteMap();
 }
