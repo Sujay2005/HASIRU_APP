@@ -2442,7 +2442,12 @@ async function loadRouteSegments(index){
 async function geocode(place){
 
     /*
-       RNS MUST ALWAYS USE THE HARD-CODED LOCATION.
+       IMPORTANT:
+       RNS is hard-coded here as well as in the backend.
+
+       This prevents the selected autocomplete text from
+       being sent to another geocoder and returning a
+       different RNS location.
     */
 
     const normalizedPlace=
@@ -2620,6 +2625,11 @@ async function findRoute(){
                 position.coords.longitude
         };
 
+
+        /*
+           RNS will ALWAYS use the exact hard-coded
+           coordinates above.
+        */
 
         destination=
             await geocode(
@@ -3141,6 +3151,11 @@ function setupMobileMapRotation(){
     }
 
 
+    /*
+       Wrapper rotates the map while Leaflet
+       remains responsible for pan and pinch zoom.
+    */
+
     mapRotationWrapper=
         document.createElement(
             "div"
@@ -3183,6 +3198,12 @@ function setupMobileMapRotation(){
         mapPane
     );
 
+
+    /*
+       Two-finger rotation.
+       Leaflet's normal two-finger pinch zoom
+       is left enabled.
+    */
 
     mapContainer.addEventListener(
         "touchstart",
@@ -3293,6 +3314,11 @@ function setupMobileMapRotation(){
         }
     );
 
+
+    /* =====================================================
+       N BUTTON
+       DIRECTLY BELOW RE-CENTER
+    ===================================================== */
 
     if(
         window.innerWidth<=800&&
@@ -3438,404 +3464,6 @@ function setupMobileMapRotation(){
 
 
 /* =========================================================
-   SATELLITE MAP VIEW
-========================================================= */
-
-let satelliteMapLayer=null;
-let satelliteMapActive=false;
-let normalBaseLayers=[];
-
-
-function captureNormalBaseLayers(){
-
-    if(
-        typeof map==="undefined"||
-        !map||
-        !map._layers
-    ){
-
-        return;
-    }
-
-    normalBaseLayers=[];
-
-    Object.keys(
-        map._layers
-    ).forEach(
-        function(key){
-
-            const layer=
-                map._layers[key];
-
-            if(
-                layer instanceof L.TileLayer
-            ){
-
-                normalBaseLayers.push(
-                    layer
-                );
-            }
-        }
-    );
-}
-
-
-function createSatelliteMapLayer(){
-
-    if(satelliteMapLayer){
-
-        return;
-    }
-
-    satelliteMapLayer=
-        L.tileLayer(
-            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-            {
-                maxZoom:19,
-
-                attribution:
-                    "Tiles © Esri"
-            }
-        );
-}
-
-
-function setSatelliteMapMode(){
-
-    if(
-        typeof map==="undefined"||
-        !map
-    ){
-
-        return;
-    }
-
-    createSatelliteMapLayer();
-
-    if(
-        !normalBaseLayers.length
-    ){
-
-        captureNormalBaseLayers();
-    }
-
-    normalBaseLayers.forEach(
-        function(layer){
-
-            if(
-                map.hasLayer(layer)
-            ){
-
-                map.removeLayer(
-                    layer
-                );
-            }
-        }
-    );
-
-    satelliteMapLayer.addTo(
-        map
-    );
-
-    satelliteMapActive=true;
-
-    updateSatelliteButton();
-}
-
-
-function setNormalMapMode(){
-
-    if(
-        typeof map==="undefined"||
-        !map
-    ){
-
-        return;
-    }
-
-    if(satelliteMapLayer){
-
-        map.removeLayer(
-            satelliteMapLayer
-        );
-    }
-
-    let restored=false;
-
-    normalBaseLayers.forEach(
-        function(layer){
-
-            if(!restored){
-
-                layer.addTo(
-                    map
-                );
-
-                restored=true;
-            }
-        }
-    );
-
-    satelliteMapActive=false;
-
-    updateSatelliteButton();
-}
-
-
-function toggleSatelliteMap(){
-
-    if(satelliteMapActive){
-
-        setNormalMapMode();
-
-    }else{
-
-        setSatelliteMapMode();
-    }
-}
-
-
-function updateSatelliteButton(){
-
-    const button=
-        document.getElementById(
-            "satelliteMapBtn"
-        );
-
-    if(!button){
-
-        return;
-    }
-
-    if(satelliteMapActive){
-
-        button.innerHTML=
-            "🗺️&nbsp; Map";
-
-        button.title=
-            "Switch to normal map";
-
-        button.setAttribute(
-            "aria-label",
-            "Switch to normal map"
-        );
-
-    }else{
-
-        button.innerHTML=
-            "🛰️&nbsp; Satellite";
-
-        button.title=
-            "Switch to satellite view";
-
-        button.setAttribute(
-            "aria-label",
-            "Switch to satellite view"
-        );
-    }
-}
-
-
-function createSatelliteMapButton(){
-
-    if(
-        document.getElementById(
-            "satelliteMapBtn"
-        )
-    ){
-
-        return;
-    }
-
-    captureNormalBaseLayers();
-
-    const button=
-        document.createElement(
-            "button"
-        );
-
-    button.id=
-        "satelliteMapBtn";
-
-    button.type=
-        "button";
-
-    button.innerHTML=
-        "🛰️&nbsp; Satellite";
-
-    button.title=
-        "Switch to satellite view";
-
-    button.setAttribute(
-        "aria-label",
-        "Switch to satellite view"
-    );
-
-    button.style.cssText=`
-        position:fixed;
-        right:14px;
-        z-index:4500;
-        height:38px;
-        padding:0 13px;
-        border:1px solid rgba(59,130,246,.55);
-        border-radius:20px;
-        background:rgba(5,15,30,.94);
-        color:#fff;
-        font-size:12px;
-        font-weight:700;
-        cursor:pointer;
-        box-shadow:0 5px 18px rgba(0,0,0,.35);
-        backdrop-filter:blur(8px);
-        -webkit-backdrop-filter:blur(8px);
-        transition:top .2s ease;
-        touch-action:manipulation;
-    `;
-
-
-    button.addEventListener(
-        "click",
-        function(event){
-
-            event.preventDefault();
-            event.stopPropagation();
-
-            toggleSatelliteMap();
-        }
-    );
-
-
-    document.body.appendChild(
-        button
-    );
-
-    positionSatelliteButton();
-}
-
-
-function positionSatelliteButton(){
-
-    const button=
-        document.getElementById(
-            "satelliteMapBtn"
-        );
-
-    if(!button){
-
-        return;
-    }
-
-    const northButton=
-        document.getElementById(
-            "mapRotationResetButton"
-        );
-
-    const recenterButton=
-        document.getElementById(
-            "recenterMapBtn"
-        );
-
-    const referenceButton=
-        northButton||
-        recenterButton;
-
-    if(!referenceButton){
-
-        button.style.top=
-            "270px";
-
-        return;
-    }
-
-    const rect=
-        referenceButton.getBoundingClientRect();
-
-    button.style.top=
-        (
-            rect.bottom+
-            8
-        )+
-        "px";
-}
-
-
-function initializeSatelliteMap(){
-
-    createSatelliteMapButton();
-
-    setTimeout(
-        positionSatelliteButton,
-        300
-    );
-
-    setTimeout(
-        positionSatelliteButton,
-        800
-    );
-
-    window.addEventListener(
-        "resize",
-        positionSatelliteButton
-    );
-
-    const recenterButton=
-        document.getElementById(
-            "recenterMapBtn"
-        );
-
-    if(recenterButton){
-
-        const observer=
-            new MutationObserver(
-                function(){
-
-                    requestAnimationFrame(
-                        positionSatelliteButton
-                    );
-                }
-            );
-
-        observer.observe(
-            recenterButton,
-            {
-                attributes:true,
-                attributeFilter:[
-                    "style"
-                ]
-            }
-        );
-    }
-
-    const northButton=
-        document.getElementById(
-            "mapRotationResetButton"
-        );
-
-    if(northButton){
-
-        const observer=
-            new MutationObserver(
-                function(){
-
-                    requestAnimationFrame(
-                        positionSatelliteButton
-                    );
-                }
-            );
-
-        observer.observe(
-            northButton,
-            {
-                attributes:true,
-                attributeFilter:[
-                    "style"
-                ]
-            }
-        );
-    }
-}
-
-
-/* =========================================================
    INITIALIZATION
 ========================================================= */
 
@@ -3852,14 +3480,10 @@ if(
         function(){
 
             setupMobileMapRotation();
-
-            initializeSatelliteMap();
         }
     );
 
 }else{
 
     setupMobileMapRotation();
-
-    initializeSatelliteMap();
 }
