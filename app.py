@@ -34,7 +34,10 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return render_template("index.html")
+
+    return render_template(
+        "index.html"
+    )
 
 
 # ============================================================
@@ -44,35 +47,52 @@ def home():
 @app.route("/geocode")
 def geocode():
 
-    query = request.args.get("q", "").strip()
+    query = request.args.get(
+        "q",
+        ""
+    ).strip()
 
     if not query:
+
         return jsonify([])
 
     # --------------------------------------------------------
-    # PRIMARY GEOCODER: PHOTON
+    # OPEN-METEO GEOCODING
     # --------------------------------------------------------
 
     try:
 
         params = urlencode({
-            "q": query,
-            "limit": 5
+
+            "name": query,
+
+            "count": 5,
+
+            "language": "en",
+
+            "format": "json"
+
         })
 
         url = (
-            "https://photon.komoot.io/api/?"
+            "https://geocoding-api.open-meteo.com/v1/search?"
             + params
         )
 
         req = Request(
+
             url,
+
             headers={
+
                 "User-Agent":
                     "HASIRU-AQI-Navigator/1.0",
+
                 "Accept":
                     "application/json"
+
             }
+
         )
 
         with urlopen(
@@ -81,144 +101,114 @@ def geocode():
         ) as response:
 
             data = json.loads(
+
                 response.read().decode(
                     "utf-8"
                 )
+
             )
 
         results = []
 
-        for feature in data.get(
-            "features",
+        for place in data.get(
+            "results",
             []
         ):
 
-            geometry = feature.get(
-                "geometry",
-                {}
+            latitude = place.get(
+                "latitude"
             )
 
-            coordinates = geometry.get(
-                "coordinates",
-                []
+            longitude = place.get(
+                "longitude"
             )
 
-            properties = feature.get(
-                "properties",
-                {}
-            )
+            if (
+                latitude is None
+                or longitude is None
+            ):
 
-            if len(coordinates) < 2:
                 continue
 
-            lon = coordinates[0]
-            lat = coordinates[1]
-
-            name_parts = []
-
-            for key in [
+            name = place.get(
                 "name",
-                "street",
-                "district",
-                "city",
-                "state",
-                "country"
+                ""
+            )
+
+            admin1 = place.get(
+                "admin1",
+                ""
+            )
+
+            admin2 = place.get(
+                "admin2",
+                ""
+            )
+
+            country = place.get(
+                "country",
+                ""
+            )
+
+            parts = []
+
+            for value in [
+
+                name,
+
+                admin2,
+
+                admin1,
+
+                country
+
             ]:
 
-                value = properties.get(key)
-
                 if (
+
                     value
-                    and value not in name_parts
+                    and str(value)
+                    not in parts
+
                 ):
 
-                    name_parts.append(
+                    parts.append(
                         str(value)
                     )
 
             display_name = ", ".join(
-                name_parts
+                parts
             )
 
             results.append({
 
-                "lat": str(lat),
+                "lat":
+                    str(latitude),
 
-                "lon": str(lon),
+                "lon":
+                    str(longitude),
 
                 "display_name":
                     display_name
 
             })
 
-        # If Photon returned valid results,
-        # return them immediately.
-
-        if results:
-
-            return jsonify(results)
+        return jsonify(
+            results
+        )
 
     except Exception as e:
 
         print(
-            "Photon geocoding failed:",
-            e
-        )
-
-
-    # --------------------------------------------------------
-    # FALLBACK GEOCODER: NOMINATIM
-    # --------------------------------------------------------
-
-    try:
-
-        params = urlencode({
-            "format": "json",
-            "q": query,
-            "limit": 5,
-            "addressdetails": 1
-        })
-
-        url = (
-            "https://nominatim.openstreetmap.org/search?"
-            + params
-        )
-
-        req = Request(
-            url,
-            headers={
-                "User-Agent":
-                    "HASIRU-AQI-Navigator/1.0",
-                "Accept":
-                    "application/json",
-                "Accept-Language":
-                    "en"
-            }
-        )
-
-        with urlopen(
-            req,
-            timeout=10
-        ) as response:
-
-            data = json.loads(
-                response.read().decode(
-                    "utf-8"
-                )
-            )
-
-        return jsonify(data)
-
-    except Exception as e:
-
-        print(
-            "Nominatim geocoding failed:",
+            "Open-Meteo geocoding failed:",
             e
         )
 
         return jsonify({
+
             "error":
                 "Geocoding service unavailable"
+
         }), 502
 
 
@@ -266,10 +256,15 @@ def heatmap():
 def estimate(lat, lon):
 
     return jsonify(
+
         estimate_aqi(
+
             float(lat),
+
             float(lon)
+
         )
+
     )
 
 
@@ -286,12 +281,17 @@ def route_aqi():
     data = request.get_json()
 
     return jsonify(
+
         calculate_route(
+
             data["route"],
+
             float(
                 data["travel_time"]
             )
+
         )
+
     )
 
 
@@ -308,12 +308,17 @@ def future_route_aqi():
     data = request.get_json()
 
     return jsonify(
+
         calculate_future_route(
+
             data["route"],
+
             float(
                 data["travel_time"]
             )
+
         )
+
     )
 
 
@@ -330,9 +335,13 @@ def route_segments():
     data = request.get_json()
 
     return jsonify(
+
         calculate_route_segments(
+
             data["route"]
+
         )
+
     )
 
 
@@ -346,23 +355,32 @@ def ranking():
     points = get_latest_points()
 
     points = sorted(
+
         points,
+
         key=lambda x: x["aqi"]
+
     )
 
     clean = points[:3]
 
     polluted = sorted(
+
         points,
+
         key=lambda x: x["aqi"],
+
         reverse=True
+
     )[:3]
 
     return jsonify({
 
-        "clean": clean,
+        "clean":
+            clean,
 
-        "polluted": polluted
+        "polluted":
+            polluted
 
     })
 
@@ -394,8 +412,12 @@ def station_history(device):
                 "aqi_calibrated"
             ]
         ]
+
         .tail(24)
-        .to_dict("records")
+
+        .to_dict(
+            "records"
+        )
 
     )
 
@@ -435,7 +457,9 @@ def heatmap_hour(hour):
 
         ])
 
-    return jsonify(points)
+    return jsonify(
+        points
+    )
 
 
 # ============================================================
@@ -555,15 +579,23 @@ def station_prediction_status():
     )
 
     latest_rows = (
+
         latest_df
-        .groupby("device_id")
+
+        .groupby(
+            "device_id"
+        )
+
         .last()
+
         .reset_index()
+
     )
 
     prediction_map = {
 
-        p["device"]: p["aqi"]
+        p["device"]:
+            p["aqi"]
 
         for p in predicted_points
 
@@ -573,12 +605,16 @@ def station_prediction_status():
 
     for _, row in latest_rows.iterrows():
 
-        device = row["device_id"]
+        device = row[
+            "device_id"
+        ]
 
         last_aqi = round(
 
             float(
-                row["aqi_calibrated"]
+                row[
+                    "aqi_calibrated"
+                ]
             ),
 
             2
@@ -588,10 +624,15 @@ def station_prediction_status():
         predicted = round(
 
             float(
+
                 prediction_map.get(
+
                     device,
+
                     last_aqi
+
                 )
+
             ),
 
             2
@@ -616,7 +657,9 @@ def station_prediction_status():
 
         })
 
-    return jsonify(result)
+    return jsonify(
+        result
+    )
 
 
 # ============================================================
