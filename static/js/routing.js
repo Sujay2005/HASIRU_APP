@@ -46,6 +46,37 @@ const NAVIGATION_REROUTE_COOLDOWN=5000;
 
 
 /* =========================================================
+   VOICE NAVIGATION STATE
+========================================================= */
+
+const NAVIGATION_VOICE_ENABLED=true;
+const NAVIGATION_VOICE_LANGUAGE="en-IN";
+
+const NAVIGATION_VOICE_LEAD_DISTANCES=[
+    500,
+    200,
+    50
+];
+
+let navigationVoiceSteps=[];
+let navigationVoiceStepIndex=0;
+let navigationVoiceAnnounced={};
+let navigationVoiceLastPosition=null;
+let navigationVoiceReady=false;
+let navigationVoiceLastSpokenTime=0;
+
+
+/* =========================================================
+   SATELLITE MAP STATE
+========================================================= */
+
+let satelliteLayer=null;
+let satelliteLabelsLayer=null;
+let satelliteModeActive=false;
+let satelliteControl=null;
+
+
+/* =========================================================
    DISTANCE
 ========================================================= */
 
@@ -353,6 +384,747 @@ function trimNavigationRoute(
 
 
 /* =========================================================
+   VOICE NAVIGATION
+========================================================= */
+
+function navigationSpeak(text){
+
+    if(
+        !NAVIGATION_VOICE_ENABLED||
+        !("speechSynthesis" in window)||
+        !text
+    ){
+
+        return;
+    }
+
+    try{
+
+        window.speechSynthesis.cancel();
+
+        const utterance=
+            new SpeechSynthesisUtterance(
+                text
+            );
+
+        utterance.lang=
+            NAVIGATION_VOICE_LANGUAGE;
+
+        utterance.rate=.95;
+        utterance.pitch=1;
+        utterance.volume=1;
+
+        navigationVoiceLastSpokenTime=
+            Date.now();
+
+        window.speechSynthesis.speak(
+            utterance
+        );
+
+    }catch(error){
+
+        console.warn(
+            "Navigation voice error:",
+            error
+        );
+    }
+}
+
+
+function formatNavigationDistance(
+    meters
+){
+
+    meters=Number(meters);
+
+    if(!Number.isFinite(meters)){
+        return "";
+    }
+
+    if(meters>=1000){
+
+        const km=
+            meters/1000;
+
+        if(km>=10){
+
+            return Math.round(km)+" kilometres";
+        }
+
+        return km.toFixed(1)+
+            " kilometres";
+    }
+
+    if(meters>=100){
+
+        return Math.round(
+            meters/50
+        )*50+
+            " metres";
+    }
+
+    return Math.max(
+        10,
+        Math.round(
+            meters/10
+        )*10
+    )+
+        " metres";
+}
+
+
+function getNavigationInstruction(
+    step
+){
+
+    if(
+        !step||
+        !step.maneuver
+    ){
+
+        return "Continue on the route";
+    }
+
+    const maneuver=
+        step.maneuver;
+
+    const type=
+        String(
+            maneuver.type||""
+        ).toLowerCase();
+
+    const modifier=
+        String(
+            maneuver.modifier||""
+        ).toLowerCase();
+
+    if(type==="arrive"){
+
+        return "You have arrived at your destination";
+    }
+
+    if(type==="depart"){
+
+        if(
+            modifier==="left"
+        ){
+
+            return "Start by turning left";
+        }
+
+        if(
+            modifier==="right"
+        ){
+
+            return "Start by turning right";
+        }
+
+        return "Start driving on the route";
+    }
+
+    if(
+        type==="roundabout"||
+        type==="rotary"
+    ){
+
+        const exitNumber=
+            maneuver.exit;
+
+        if(exitNumber){
+
+            return "Enter the roundabout and take exit "+
+                exitNumber;
+        }
+
+        return "Enter the roundabout";
+    }
+
+    if(type==="fork"){
+
+        if(modifier.includes("left")){
+
+            return "Keep left at the fork";
+        }
+
+        if(modifier.includes("right")){
+
+            return "Keep right at the fork";
+        }
+
+        return "Keep straight at the fork";
+    }
+
+    if(type==="merge"){
+
+        if(modifier.includes("left")){
+
+            return "Merge left";
+        }
+
+        if(modifier.includes("right")){
+
+            return "Merge right";
+        }
+
+        return "Merge onto the road";
+    }
+
+    if(
+        type==="on ramp"||
+        type==="on-ramp"
+    ){
+
+        if(modifier.includes("left")){
+
+            return "Take the ramp on the left";
+        }
+
+        if(modifier.includes("right")){
+
+            return "Take the ramp on the right";
+        }
+
+        return "Take the ramp";
+    }
+
+    if(
+        type==="off ramp"||
+        type==="off-ramp"
+    ){
+
+        if(modifier.includes("left")){
+
+            return "Take the exit on the left";
+        }
+
+        if(modifier.includes("right")){
+
+            return "Take the exit on the right";
+        }
+
+        return "Take the exit";
+    }
+
+    if(
+        type==="uturn"||
+        type==="u-turn"
+    ){
+
+        return "Make a U-turn";
+    }
+
+    if(type==="new name"){
+
+        return "Continue onto the new road";
+    }
+
+    if(type==="notification"){
+
+        return "Continue on the route";
+    }
+
+    if(
+        modifier==="sharp left"
+    ){
+
+        return "Turn sharply left";
+    }
+
+    if(
+        modifier==="sharp right"
+    ){
+
+        return "Turn sharply right";
+    }
+
+    if(
+        modifier==="slight left"
+    ){
+
+        return "Keep slightly left";
+    }
+
+    if(
+        modifier==="slight right"
+    ){
+
+        return "Keep slightly right";
+    }
+
+    if(
+        modifier==="left"
+    ){
+
+        return "Turn left";
+    }
+
+    if(
+        modifier==="right"
+    ){
+
+        return "Turn right";
+    }
+
+    if(
+        modifier==="straight"
+    ){
+
+        return "Continue straight";
+    }
+
+    return "Continue on the route";
+}
+
+
+function buildNavigationVoiceSteps(
+    route
+){
+
+    navigationVoiceSteps=[];
+    navigationVoiceStepIndex=0;
+    navigationVoiceAnnounced={};
+    navigationVoiceReady=false;
+
+    if(
+        !route||
+        !route.legs||
+        !route.legs.length
+    ){
+
+        return;
+    }
+
+    const steps=[];
+
+    route.legs.forEach(
+        function(leg){
+
+            if(
+                !leg.steps||
+                !leg.steps.length
+            ){
+
+                return;
+            }
+
+            leg.steps.forEach(
+                function(step){
+
+                    if(
+                        !step.maneuver||
+                        !step.maneuver.location
+                    ){
+
+                        return;
+                    }
+
+                    const location=
+                        step.maneuver.location;
+
+                    steps.push({
+
+                        lat:
+                            Number(
+                                location[1]
+                            ),
+
+                        lng:
+                            Number(
+                                location[0]
+                            ),
+
+                        distance:
+                            Number(
+                                step.distance||0
+                            ),
+
+                        instruction:
+                            getNavigationInstruction(
+                                step
+                            ),
+
+                        announced:{}
+                    });
+                }
+            );
+        }
+    );
+
+    navigationVoiceSteps=steps;
+    navigationVoiceReady=
+        navigationVoiceSteps.length>0;
+}
+
+
+function distanceToNavigationVoiceStep(
+    position,
+    step
+){
+
+    return getDistanceMeters(
+        position.lat,
+        position.lng,
+        step.lat,
+        step.lng
+    );
+}
+
+
+function updateNavigationVoice(
+    currentPosition
+){
+
+    if(
+        !navigationActive||
+        !navigationVoiceReady||
+        !navigationVoiceSteps.length
+    ){
+
+        return;
+    }
+
+    navigationVoiceLastPosition=
+        currentPosition;
+
+    while(
+        navigationVoiceStepIndex<
+        navigationVoiceSteps.length
+    ){
+
+        const step=
+            navigationVoiceSteps[
+                navigationVoiceStepIndex
+            ];
+
+        const distance=
+            distanceToNavigationVoiceStep(
+                currentPosition,
+                step
+            );
+
+        if(distance<=20){
+
+            const arrive=
+                step.instruction
+                    .toLowerCase()
+                    .includes(
+                        "arrived"
+                    );
+
+            if(
+                !navigationVoiceAnnounced[
+                    navigationVoiceStepIndex+
+                    "_turn"
+                ]
+            ){
+
+                navigationSpeak(
+                    step.instruction
+                );
+
+                navigationVoiceAnnounced[
+                    navigationVoiceStepIndex+
+                    "_turn"
+                ]=true;
+            }
+
+            navigationVoiceStepIndex++;
+
+            if(arrive){
+
+                return;
+            }
+
+            continue;
+        }
+
+        for(
+            let i=0;
+            i<NAVIGATION_VOICE_LEAD_DISTANCES.length;
+            i++
+        ){
+
+            const leadDistance=
+                NAVIGATION_VOICE_LEAD_DISTANCES[i];
+
+            if(
+                distance<=leadDistance
+            ){
+
+                const key=
+                    navigationVoiceStepIndex+
+                    "_" +
+                    leadDistance;
+
+                if(
+                    !navigationVoiceAnnounced[key]
+                ){
+
+                    navigationSpeak(
+                        step.instruction+
+                        " in "+
+                        formatNavigationDistance(
+                            distance
+                        )
+                    );
+
+                    navigationVoiceAnnounced[key]=
+                        true;
+                }
+
+                break;
+            }
+        }
+
+        break;
+    }
+}
+
+
+function resetNavigationVoice(){
+
+    navigationVoiceSteps=[];
+    navigationVoiceStepIndex=0;
+    navigationVoiceAnnounced={};
+    navigationVoiceLastPosition=null;
+    navigationVoiceReady=false;
+
+    if(
+        "speechSynthesis" in window
+    ){
+
+        try{
+
+            window.speechSynthesis.cancel();
+
+        }catch(error){}
+    }
+}
+
+
+function announceNavigationStart(){
+
+    if(
+        !navigationVoiceReady||
+        !navigationVoiceSteps.length
+    ){
+
+        navigationSpeak(
+            "Navigation started"
+        );
+
+        return;
+    }
+
+    navigationSpeak(
+        "Navigation started. "+
+        navigationVoiceSteps[0].instruction+
+        " in "+
+        formatNavigationDistance(
+            navigationVoiceSteps[0].distance
+        )
+    );
+}
+
+
+/* =========================================================
+   SATELLITE MAP
+========================================================= */
+
+function initializeSatelliteMap(){
+
+    if(
+        typeof map==="undefined"||
+        !map
+    ){
+
+        return;
+    }
+
+    if(
+        satelliteControl
+    ){
+
+        return;
+    }
+
+    satelliteLayer=
+        L.tileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            {
+                maxZoom:19,
+                attribution:
+                    "Tiles © Esri"
+            }
+        );
+
+    satelliteLabelsLayer=
+        L.tileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+            {
+                maxZoom:19,
+                opacity:.9,
+                attribution:
+                    "Labels © Esri"
+            }
+        );
+
+    satelliteControl=
+        document.createElement(
+            "button"
+        );
+
+    satelliteControl.id=
+        "satelliteMapControl";
+
+    satelliteControl.type=
+        "button";
+
+    satelliteControl.innerHTML=
+        "🛰️";
+
+    satelliteControl.title=
+        "Satellite view";
+
+    satelliteControl.setAttribute(
+        "aria-label",
+        "Toggle satellite view"
+    );
+
+    satelliteControl.style.cssText=`
+        position:fixed;
+        top:85px;
+        right:14px;
+        z-index:4500;
+        width:42px;
+        height:42px;
+        border:1px solid rgba(59,130,246,.55);
+        border-radius:12px;
+        background:rgba(5,15,30,.94);
+        color:#fff;
+        font-size:20px;
+        cursor:pointer;
+        box-shadow:0 5px 18px rgba(0,0,0,.35);
+        backdrop-filter:blur(8px);
+        -webkit-backdrop-filter:blur(8px);
+    `;
+
+    satelliteControl.addEventListener(
+        "click",
+        function(event){
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            toggleSatelliteMap();
+        }
+    );
+
+    document.body.appendChild(
+        satelliteControl
+    );
+
+    positionSatelliteControl();
+}
+
+
+function positionSatelliteControl(){
+
+    if(!satelliteControl){
+
+        return;
+    }
+
+    const layersControl=
+        document.querySelector(
+            ".leaflet-control-layers"
+        );
+
+    if(layersControl){
+
+        const rect=
+            layersControl.getBoundingClientRect();
+
+        satelliteControl.style.top=
+            (rect.bottom+10)+"px";
+
+        satelliteControl.style.right=
+            "14px";
+    }
+}
+
+
+function toggleSatelliteMap(){
+
+    if(
+        !map||
+        !satelliteLayer
+    ){
+
+        return;
+    }
+
+    if(
+        !satelliteModeActive
+    ){
+
+        satelliteLayer.addTo(map);
+
+        if(
+            satelliteLabelsLayer
+        ){
+
+            satelliteLabelsLayer.addTo(
+                map
+            );
+        }
+
+        satelliteModeActive=true;
+
+        if(satelliteControl){
+
+            satelliteControl.innerHTML=
+                "🗺️";
+
+            satelliteControl.title=
+                "Map view";
+        }
+
+    }else{
+
+        map.removeLayer(
+            satelliteLayer
+        );
+
+        if(
+            satelliteLabelsLayer&&
+            map.hasLayer(
+                satelliteLabelsLayer
+            )
+        ){
+
+            map.removeLayer(
+                satelliteLabelsLayer
+            );
+        }
+
+        satelliteModeActive=false;
+
+        if(satelliteControl){
+
+            satelliteControl.innerHTML=
+                "🛰️";
+
+            satelliteControl.title=
+                "Satellite view";
+        }
+    }
+
+    map.invalidateSize();
+}
+
+
+/* =========================================================
    REROUTING
 ========================================================= */
 
@@ -386,7 +1158,7 @@ async function rerouteNavigation(
         const url=
             "https://router.project-osrm.org/route/v1/driving/"+
             `${position.lng},${position.lat};${destination.lng},${destination.lat}`+
-            "?overview=full&geometries=geojson";
+            "?overview=full&geometries=geojson&steps=true";
 
         const response=
             await fetch(url);
@@ -406,6 +1178,10 @@ async function rerouteNavigation(
 
             return;
         }
+
+        buildNavigationVoiceSteps(
+            data.routes[0]
+        );
 
         const coords=
             data.routes[0]
@@ -493,6 +1269,10 @@ function updateNavigationPosition(
     }
 
     trimNavigationRoute(
+        currentPosition
+    );
+
+    updateNavigationVoice(
         currentPosition
     );
 
@@ -586,6 +1366,20 @@ function startNavigation(){
     );
 
     if(
+        !navigationVoiceReady&&
+        routeResults[selectedRoute].originalRoute
+    ){
+
+        buildNavigationVoiceSteps(
+            routeResults[
+                selectedRoute
+            ].originalRoute
+        );
+    }
+
+    announceNavigationStart();
+
+    if(
         navigationWatchId!==null
     ){
 
@@ -658,6 +1452,8 @@ function stopNavigation(
 
     navigationRouteCoords=null;
     lastKnownNavigationPosition=null;
+
+    resetNavigationVoice();
 
     if(sourceMarker){
 
@@ -897,6 +1693,12 @@ function setupLayersRecenterPosition(){
 
         recenterButton.style.top=
             (rect.bottom+10)+"px";
+
+        if(satelliteControl){
+
+            satelliteControl.style.top=
+                (rect.bottom+10)+"px";
+        }
     }
 
     updateRecenterPosition();
@@ -961,95 +1763,1522 @@ if(
 window.recenterMap=
     recenterMap;
 
-
 /* =========================================================
-   AQI
+   ROUTE SUMMARY MINIMIZE
 ========================================================= */
 
-function getAQIColor(aqi){
+function minimizeRouteSummary(){
 
-    aqi=Number(aqi);
+    const routeSummary=
+        document.getElementById(
+            "routeSummary"
+        );
 
-    if(!Number.isFinite(aqi)){
+    const restoreButton=
+        document.getElementById(
+            "routeSummaryRestoreBtn"
+        );
 
-        aqi=0;
+    if(!routeSummary){
+
+        return;
     }
 
-    if(aqi<=50)
-        return"#00e400";
+    routeSummary.style.display=
+        "none";
 
-    if(aqi<=100)
-        return"#ffff00";
+    if(restoreButton){
 
-    if(aqi<=200)
-        return"#ff7e00";
-
-    if(aqi<=300)
-        return"#ff0000";
-
-    if(aqi<=400)
-        return"#8f3f97";
-
-    return"#7e0023";
-}
-
-
-function getAQICategory(aqi){
-
-    aqi=Number(aqi);
-
-    if(!Number.isFinite(aqi)){
-
-        aqi=0;
+        restoreButton.style.display=
+            "flex";
     }
 
-    if(aqi<=50)
-        return"Good";
-
-    if(aqi<=100)
-        return"Satisfactory";
-
-    if(aqi<=200)
-        return"Moderate";
-
-    if(aqi<=300)
-        return"Poor";
-
-    if(aqi<=400)
-        return"Very Poor";
-
-    return"Severe";
+    routeSummaryMinimized=true;
 }
 
 
 /* =========================================================
-   CLOSE MOBILE SIDEBAR
+   ROUTE SUMMARY RESTORE
 ========================================================= */
 
-function closeSidebarAfterRoute(){
+function restoreRouteSummary(){
+
+    const routeSummary=
+        document.getElementById(
+            "routeSummary"
+        );
+
+    const restoreButton=
+        document.getElementById(
+            "routeSummaryRestoreBtn"
+        );
+
+    if(!routeSummary){
+
+        return;
+    }
+
+    routeSummary.style.display=
+        "block";
+
+    if(restoreButton){
+
+        restoreButton.style.display=
+            "none";
+    }
+
+    routeSummaryMinimized=false;
+}
+
+
+/* =========================================================
+   SHOW ROUTE SUMMARY
+========================================================= */
+
+function showRouteSummary(
+    index
+){
+
+    setupRouteSummaryControls();
+
+    const routeSummary=
+        document.getElementById(
+            "routeSummary"
+        );
+
+    const summaryContent=
+        document.getElementById(
+            "summaryContent"
+        );
 
     if(
-        window.innerWidth<=800&&
-        typeof closeMobileSidebar==="function"
+        !routeSummary||
+        !summaryContent||
+        !routeResults[index]
     ){
 
-        setTimeout(
+        return;
+    }
+
+    const route=
+        routeResults[index];
+
+    const future=
+        route.futureAQI||
+        {};
+
+    const averageAQI=
+        Number(
+            route.averageAQI
+        );
+
+    const maxAQI=
+        Number(
+            route.maxAQI
+        );
+
+    const exposure=
+        Number(
+            route.exposure
+        );
+
+    const futureAverage=
+        Number(
+            future.average_aqi
+        );
+
+    const category=
+        route.category||
+        getAQICategory(
+            averageAQI
+        );
+
+    summaryContent.innerHTML=`
+
+        <div class="summary-row">
+            <span>Route</span>
+            <b>
+                Route ${route.routeNumber}
+            </b>
+        </div>
+
+        <div class="summary-row">
+            <span>Distance</span>
+            <b>
+                ${route.distance} km
+            </b>
+        </div>
+
+        <div class="summary-row">
+            <span>Travel time</span>
+            <b>
+                ${route.time} min
+            </b>
+        </div>
+
+        <div class="summary-row">
+            <span>Average AQI</span>
+            <b>
+                ${Number.isFinite(averageAQI)
+                    ? averageAQI.toFixed(1)
+                    : "—"}
+            </b>
+        </div>
+
+        <div class="summary-row">
+            <span>Maximum AQI</span>
+            <b>
+                ${Number.isFinite(maxAQI)
+                    ? maxAQI.toFixed(1)
+                    : "—"}
+            </b>
+        </div>
+
+        <div class="summary-row">
+            <span>Exposure</span>
+            <b>
+                ${Number.isFinite(exposure)
+                    ? exposure.toFixed(1)
+                    : "—"}
+            </b>
+        </div>
+
+        <div class="summary-row">
+            <span>Status</span>
+            <b>
+                ${category}
+            </b>
+        </div>
+
+        <div class="summary-row">
+            <span>Future AQI</span>
+            <b>
+                ${
+                    Number.isFinite(
+                        futureAverage
+                    )
+                    ?
+                    futureAverage.toFixed(1)
+                    :
+                    "—"
+                }
+            </b>
+        </div>
+
+        <button
+            id="detailsBtn"
+            type="button"
+        >
+            View Route Details
+        </button>
+    `;
+
+    const detailsButton=
+        document.getElementById(
+            "detailsBtn"
+        );
+
+    if(detailsButton){
+
+        detailsButton.addEventListener(
+            "click",
             function(){
 
-                closeMobileSidebar();
+                if(
+                    typeof showRouteDetails===
+                    "function"
+                ){
 
-            },
-            300
+                    showRouteDetails(
+                        index
+                    );
+
+                }else{
+
+                    alert(
+                        "Route details are not available."
+                    );
+                }
+            }
+        );
+    }
+
+    routeSummary.style.display=
+        "block";
+
+    const restoreButton=
+        document.getElementById(
+            "routeSummaryRestoreBtn"
+        );
+
+    if(restoreButton){
+
+        restoreButton.style.display=
+            "none";
+    }
+
+    routeSummaryMinimized=false;
+}
+
+
+/* =========================================================
+   ROUTE DETAILS
+========================================================= */
+
+function showRouteDetails(
+    index
+){
+
+    if(
+        !routeResults[index]
+    ){
+
+        return;
+    }
+
+    const route=
+        routeResults[index];
+
+    const future=
+        route.futureAQI||
+        {};
+
+    const averageAQI=
+        Number(
+            route.averageAQI
+        );
+
+    const maxAQI=
+        Number(
+            route.maxAQI
+        );
+
+    const exposure=
+        Number(
+            route.exposure
+        );
+
+    const futureAQI=
+        Number(
+            future.average_aqi
+        );
+
+    const details=
+        [
+            "Route "+route.routeNumber,
+
+            "Distance: "+
+            route.distance+
+            " km",
+
+            "Travel time: "+
+            route.time+
+            " min",
+
+            "Average AQI: "+
+            (
+                Number.isFinite(
+                    averageAQI
+                )
+                ?
+                averageAQI.toFixed(1)
+                :
+                "Unavailable"
+            ),
+
+            "Maximum AQI: "+
+            (
+                Number.isFinite(
+                    maxAQI
+                )
+                ?
+                maxAQI.toFixed(1)
+                :
+                "Unavailable"
+            ),
+
+            "Exposure score: "+
+            (
+                Number.isFinite(
+                    exposure
+                )
+                ?
+                exposure.toFixed(1)
+                :
+                "Unavailable"
+            ),
+
+            "Current category: "+
+            (
+                route.category||
+                getAQICategory(
+                    averageAQI
+                )
+            ),
+
+            "Future AQI: "+
+            (
+                Number.isFinite(
+                    futureAQI
+                )
+                ?
+                futureAQI.toFixed(1)
+                :
+                "Unavailable"
+            )
+        ];
+
+    alert(
+        details.join("\n")
+    );
+}
+
+
+/* =========================================================
+   ROUTE CARDS
+========================================================= */
+
+function renderRouteCards(){
+
+    const routeInfo=
+        document.getElementById(
+            "routeInfo"
+        );
+
+    if(!routeInfo){
+
+        return;
+    }
+
+    routeInfo.innerHTML="";
+
+    routeResults.forEach(
+        function(route,index){
+
+            const card=
+                document.createElement(
+                    "div"
+                );
+
+            card.className=
+                "route-card";
+
+            if(index===selectedRoute){
+
+                card.classList.add(
+                    "selected"
+                );
+            }
+
+            const isRecommended=
+                index===
+                recommendedIndex;
+
+            const isFastest=
+                index===
+                fastestIndex;
+
+            card.innerHTML=`
+
+                <div class="route-card-title">
+                    Route ${route.routeNumber}
+
+                    ${
+                        isRecommended
+                        ?
+                        '<span class="route-badge">Recommended</span>'
+                        :
+                        ''
+                    }
+
+                    ${
+                        isFastest
+                        ?
+                        '<span class="route-badge fastest">Fastest</span>'
+                        :
+                        ''
+                    }
+                </div>
+
+                <div class="route-card-info">
+
+                    <span>
+                        ${route.distance} km
+                    </span>
+
+                    <span>
+                        ${route.time} min
+                    </span>
+
+                </div>
+
+                <div class="route-card-aqi">
+
+                    <span>
+                        AQI ${Number(
+                            route.averageAQI
+                        ).toFixed(1)}
+                    </span>
+
+                    <span>
+                        ${route.category}
+                    </span>
+
+                </div>
+            `;
+
+            card.addEventListener(
+                "click",
+                function(){
+
+                    selectRoute(
+                        index
+                    );
+                }
+            );
+
+            routeInfo.appendChild(
+                card
+            );
+        }
+    );
+}
+
+
+/* =========================================================
+   ROUTE SEGMENTS
+========================================================= */
+
+async function loadRouteSegments(
+    index
+){
+
+    if(
+        !routeResults[index]
+    ){
+
+        return;
+    }
+
+    routeSegmentsLayer.clearLayers();
+
+    const route=
+        routeResults[index];
+
+    if(
+        !route.routeCoords||
+        route.routeCoords.length<2
+    ){
+
+        return;
+    }
+
+    try{
+
+        const response=
+            await fetch(
+                "/route_segments",
+                {
+                    method:"POST",
+
+                    headers:{
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body:
+                        JSON.stringify({
+                            route:
+                                route.routeCoords
+                        })
+                }
+            );
+
+        if(
+            !response.ok
+        ){
+
+            return;
+        }
+
+        const data=
+            await response.json();
+
+        if(
+            !Array.isArray(data)
+        ){
+
+            return;
+        }
+
+        data.forEach(
+            function(segment){
+
+                if(
+                    !segment||
+                    !segment.coordinates
+                ){
+
+                    return;
+                }
+
+                const coordinates=
+                    segment.coordinates;
+
+                const color=
+                    getAQIColor(
+                        segment.aqi
+                    );
+
+                const polyline=
+                    L.polyline(
+                        coordinates,
+                        {
+                            color:color,
+                            weight:7,
+                            opacity:.85
+                        }
+                    );
+
+                polyline.bindPopup(`
+                    <b>AQI:</b>
+                    ${
+                        Number(
+                            segment.aqi
+                        ).toFixed(1)
+                    }
+                    <br>
+                    <b>Status:</b>
+                    ${
+                        segment.category||
+                        getAQICategory(
+                            segment.aqi
+                        )
+                    }
+                `);
+
+                routeSegmentsLayer.addLayer(
+                    polyline
+                );
+            }
+        );
+
+    }catch(error){
+
+        console.warn(
+            "Route segment loading failed:",
+            error
         );
     }
 }
 
 
 /* =========================================================
-   ROUTE SELECTION
+   SOURCE / DESTINATION MARKERS
 ========================================================= */
 
-function selectRoute(index){
+function createSourceMarker(
+    position
+){
+
+    if(sourceMarker){
+
+        sourceMarker.setLatLng([
+            position.lat,
+            position.lng
+        ]);
+
+        return;
+    }
+
+    sourceMarker=
+        L.marker([
+            position.lat,
+            position.lng
+        ])
+        .addTo(map)
+        .bindPopup(
+            "<b>Start</b>"
+        );
+}
+
+
+function createDestinationMarker(
+    position
+){
+
+    if(destinationMarker){
+
+        destinationMarker.setLatLng([
+            position.lat,
+            position.lng
+        ]);
+
+        return;
+    }
+
+    destinationMarker=
+        L.marker([
+            position.lat,
+            position.lng
+        ])
+        .addTo(map)
+        .bindPopup(
+            "<b>Destination</b>"
+        );
+}
+
+
+/* =========================================================
+   SET SOURCE
+========================================================= */
+
+function setSource(
+    lat,
+    lng
+){
+
+    source={
+        lat:Number(lat),
+        lng:Number(lng)
+    };
+
+    createSourceMarker(
+        source
+    );
+}
+
+
+/* =========================================================
+   SET DESTINATION
+========================================================= */
+
+function setDestination(
+    lat,
+    lng
+){
+
+    destination={
+        lat:Number(lat),
+        lng:Number(lng)
+    };
+
+    createDestinationMarker(
+        destination
+    );
+}
+
+
+/* =========================================================
+   CLEAR ROUTE
+========================================================= */
+
+function clearRoute(){
+
+    routeSegmentsLayer.clearLayers();
+
+    alternateRoutesLayer.clearLayers();
+
+    routePolylines=[];
+
+    routeResults=[];
+
+    recommendedIndex=-1;
+
+    fastestIndex=-1;
+
+    selectedRoute=0;
+
+    userSelectedRoute=false;
+
+    if(sourceMarker){
+
+        map.removeLayer(
+            sourceMarker
+        );
+
+        sourceMarker=null;
+    }
+
+    if(destinationMarker){
+
+        map.removeLayer(
+            destinationMarker
+        );
+
+        destinationMarker=null;
+    }
+
+    if(navigationActive){
+
+        stopNavigation(false);
+    }
+
+    source=null;
+    destination=null;
+
+    const routeInfo=
+        document.getElementById(
+            "routeInfo"
+        );
+
+    if(routeInfo){
+
+        routeInfo.innerHTML="";
+    }
+
+    const routeSummary=
+        document.getElementById(
+            "routeSummary"
+        );
+
+    if(routeSummary){
+
+        routeSummary.style.display=
+            "none";
+    }
+
+    const restoreButton=
+        document.getElementById(
+            "routeSummaryRestoreBtn"
+        );
+
+    if(restoreButton){
+
+        restoreButton.style.display=
+            "none";
+    }
+}
+
+
+/* =========================================================
+   USE CURRENT LOCATION AS SOURCE
+========================================================= */
+
+function useCurrentLocation(){
+
+    if(
+        !navigator.geolocation
+    ){
+
+        alert(
+            "Geolocation is not supported by this browser."
+        );
+
+        return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+
+        function(position){
+
+            const current={
+                lat:
+                    position.coords.latitude,
+
+                lng:
+                    position.coords.longitude
+            };
+
+            setSource(
+                current.lat,
+                current.lng
+            );
+
+            map.setView(
+                [
+                    current.lat,
+                    current.lng
+                ],
+                16,
+                {
+                    animate:true
+                }
+            );
+
+        },
+
+        function(error){
+
+            console.warn(
+                "Current location error:",
+                error
+            );
+
+            alert(
+                "Unable to get your current location."
+            );
+        },
+
+        {
+            enableHighAccuracy:true,
+            timeout:10000,
+            maximumAge:2000
+        }
+    );
+}
+
+
+/* =========================================================
+   ROUTE DISTANCE FORMAT
+========================================================= */
+
+function formatRouteDistance(
+    distanceKm
+){
+
+    const value=
+        Number(
+            distanceKm
+        );
+
+    if(
+        !Number.isFinite(value)
+    ){
+
+        return "—";
+    }
+
+    if(value<1){
+
+        return Math.round(
+            value*1000
+        )+
+        " m";
+    }
+
+    return value.toFixed(2)+
+        " km";
+}
+
+
+/* =========================================================
+   ROUTE TIME FORMAT
+========================================================= */
+
+function formatRouteTime(
+    minutes
+){
+
+    const value=
+        Number(
+            minutes
+        );
+
+    if(
+        !Number.isFinite(value)
+    ){
+
+        return "—";
+    }
+
+    if(value<1){
+
+        return "<1 min";
+    }
+
+    const rounded=
+        Math.round(value);
+
+    if(
+        rounded<60
+    ){
+
+        return rounded+
+            " min";
+    }
+
+    const hours=
+        Math.floor(
+            rounded/60
+        );
+
+    const mins=
+        rounded%60;
+
+    if(mins===0){
+
+        return hours+
+            " hr";
+    }
+
+    return hours+
+        " hr "+
+        mins+
+        " min";
+}
+
+
+/* =========================================================
+   ROUTE AQI HELPERS
+========================================================= */
+
+function getRouteAQIValue(
+    route
+){
+
+    if(!route){
+
+        return 0;
+    }
+
+    const value=
+        Number(
+            route.averageAQI
+        );
+
+    return Number.isFinite(value)
+        ?
+        value
+        :
+        0;
+}
+
+
+/* =========================================================
+   INITIALIZE ROUTING UI
+========================================================= */
+
+function initializeRoutingUI(){
+
+    setupRouteSummaryControls();
+
+    initializeRecenterButton();
+
+    setTimeout(
+        function(){
+
+            initializeSatelliteMap();
+
+            setupLayersRecenterPosition();
+
+        },
+        500
+    );
+}
+
+/* =========================================================
+   ROUTE AQI DISPLAY
+========================================================= */
+
+function updateRouteAQIDisplay(
+    route
+){
+
+    if(!route){
+
+        return;
+    }
+
+    const averageAQI=
+        Number(
+            route.averageAQI
+        );
+
+    const maxAQI=
+        Number(
+            route.maxAQI
+        );
+
+    const exposure=
+        Number(
+            route.exposure
+        );
+
+    const category=
+        route.category||
+        getAQICategory(
+            averageAQI
+        );
+
+    const averageElement=
+        document.getElementById(
+            "averageAQI"
+        );
+
+    const maxElement=
+        document.getElementById(
+            "maxAQI"
+        );
+
+    const exposureElement=
+        document.getElementById(
+            "exposureScore"
+        );
+
+    const categoryElement=
+        document.getElementById(
+            "aqiCategory"
+        );
+
+    if(averageElement){
+
+        averageElement.textContent=
+            Number.isFinite(
+                averageAQI
+            )
+            ?
+            averageAQI.toFixed(1)
+            :
+            "0";
+    }
+
+    if(maxElement){
+
+        maxElement.textContent=
+            Number.isFinite(
+                maxAQI
+            )
+            ?
+            maxAQI.toFixed(1)
+            :
+            "0";
+    }
+
+    if(exposureElement){
+
+        exposureElement.textContent=
+            Number.isFinite(
+                exposure
+            )
+            ?
+            exposure.toFixed(1)
+            :
+            "0";
+    }
+
+    if(categoryElement){
+
+        categoryElement.textContent=
+            category;
+    }
+}
+
+
+/* =========================================================
+   FUTURE AQI DISPLAY
+========================================================= */
+
+function updateFutureAQIDisplay(
+    futureAQI
+){
+
+    if(!futureAQI){
+
+        return;
+    }
+
+    const value=
+        Number(
+            futureAQI.average_aqi
+        );
+
+    const element=
+        document.getElementById(
+            "futureAQI"
+        );
+
+    if(!element){
+
+        return;
+    }
+
+    element.textContent=
+        Number.isFinite(value)
+        ?
+        value.toFixed(1)
+        :
+        "0";
+}
+
+
+/* =========================================================
+   ROUTE CARD STYLES
+========================================================= */
+
+function injectRouteCardStyles(){
+
+    if(
+        document.getElementById(
+            "routeCardStyles"
+        )
+    ){
+
+        return;
+    }
+
+    const style=
+        document.createElement(
+            "style"
+        );
+
+    style.id=
+        "routeCardStyles";
+
+    style.textContent=`
+
+        .route-card{
+
+            margin:8px 0;
+
+            padding:12px;
+
+            border-radius:12px;
+
+            background:
+                rgba(30,41,59,.75);
+
+            border:
+                1px solid
+                rgba(148,163,184,.14);
+
+            color:#e2e8f0;
+
+            cursor:pointer;
+
+            transition:
+                transform .15s ease,
+                border-color .15s ease,
+                background .15s ease;
+        }
+
+        .route-card:hover{
+
+            transform:
+                translateY(-1px);
+
+            border-color:
+                rgba(59,130,246,.45);
+        }
+
+        .route-card.selected{
+
+            border-color:
+                rgba(59,130,246,.85);
+
+            background:
+                rgba(30,64,175,.28);
+        }
+
+        .route-card-title{
+
+            display:flex;
+
+            align-items:center;
+
+            flex-wrap:wrap;
+
+            gap:6px;
+
+            font-size:13px;
+
+            font-weight:750;
+
+            margin-bottom:8px;
+        }
+
+        .route-card-info{
+
+            display:flex;
+
+            justify-content:space-between;
+
+            gap:10px;
+
+            margin-bottom:7px;
+
+            font-size:12px;
+
+            color:#cbd5e1;
+        }
+
+        .route-card-aqi{
+
+            display:flex;
+
+            justify-content:space-between;
+
+            gap:10px;
+
+            font-size:11px;
+
+            color:#94a3b8;
+        }
+
+        .route-badge{
+
+            display:inline-flex;
+
+            align-items:center;
+
+            padding:3px 7px;
+
+            border-radius:999px;
+
+            background:
+                rgba(34,197,94,.16);
+
+            color:#86efac;
+
+            font-size:9px;
+
+            font-weight:750;
+        }
+
+        .route-badge.fastest{
+
+            background:
+                rgba(59,130,246,.16);
+
+            color:#93c5fd;
+        }
+
+    `;
+
+    document.head.appendChild(
+        style
+    );
+}
+
+
+/* =========================================================
+   ROUTE DATA VALIDATION
+========================================================= */
+
+function isValidRouteCoordinates(
+    coords
+){
+
+    if(
+        !Array.isArray(coords)||
+        coords.length<2
+    ){
+
+        return false;
+    }
+
+    return coords.every(
+        function(point){
+
+            return(
+                Array.isArray(point)&&
+                point.length>=2&&
+                Number.isFinite(
+                    Number(point[0])
+                )&&
+                Number.isFinite(
+                    Number(point[1])
+                )
+            );
+        }
+    );
+}
+
+
+/* =========================================================
+   ROUTE BOUNDS
+========================================================= */
+
+function getRouteBounds(
+    coords
+){
+
+    if(
+        !isValidRouteCoordinates(
+            coords
+        )
+    ){
+
+        return null;
+    }
+
+    const bounds=
+        L.latLngBounds([]);
+
+    coords.forEach(
+        function(point){
+
+            bounds.extend([
+                point[0],
+                point[1]
+            ]);
+        }
+    );
+
+    return bounds;
+}
+
+
+/* =========================================================
+   FIT ROUTE TO MAP
+========================================================= */
+
+function fitRouteToMap(
+    coords
+){
+
+    const bounds=
+        getRouteBounds(
+            coords
+        );
+
+    if(
+        !bounds||
+        !bounds.isValid()
+    ){
+
+        return;
+    }
+
+    map.fitBounds(
+        bounds,
+        {
+            padding:[
+                30,
+                30
+            ]
+        }
+    );
+}
+
+
+/* =========================================================
+   SELECT RECOMMENDED ROUTE
+========================================================= */
+
+function selectRecommendedRoute(){
+
+    if(
+        recommendedIndex<0||
+        !routeResults[
+            recommendedIndex
+        ]
+    ){
+
+        return;
+    }
+
+    selectRoute(
+        recommendedIndex
+    );
+}
+
+
+/* =========================================================
+   SELECT FASTEST ROUTE
+========================================================= */
+
+function selectFastestRoute(){
+
+    if(
+        fastestIndex<0||
+        !routeResults[
+            fastestIndex
+        ]
+    ){
+
+        return;
+    }
+
+    selectRoute(
+        fastestIndex
+    );
+}
+
+
+/* =========================================================
+   ROUTE DRAW HELPERS
+========================================================= */
+
+function clearRoutePolylines(){
+
+    routePolylines.forEach(
+        function(polyline){
+
+            if(
+                polyline&&
+                map.hasLayer(
+                    polyline
+                )
+            ){
+
+                map.removeLayer(
+                    polyline
+                );
+            }
+        }
+    );
+
+    routePolylines=[];
+}
+
+
+/* =========================================================
+   UPDATE SELECTED ROUTE
+========================================================= */
+
+function updateSelectedRoute(){
+
+    routePolylines.forEach(
+        function(polyline,index){
+
+            if(!polyline){
+
+                return;
+            }
+
+            if(
+                index===
+                selectedRoute
+            ){
+
+                polyline.setStyle({
+
+                    weight:10,
+
+                    opacity:1
+                });
+
+            }else{
+
+                polyline.setStyle({
+
+                    weight:5,
+
+                    opacity:.65
+                });
+            }
+        }
+    );
+
+    if(
+        routeResults[
+            selectedRoute
+        ]
+    ){
+
+        updateRouteAQIDisplay(
+            routeResults[
+                selectedRoute
+            ]
+        );
+
+        updateFutureAQIDisplay(
+            routeResults[
+                selectedRoute
+            ].futureAQI
+        );
+    }
+}
+
+
+/* =========================================================
+   ROUTE SELECTION — UPDATED
+========================================================= */
+
+function selectRoute(
+    index
+){
 
     if(
         !routePolylines[index]||
@@ -1060,12 +3289,22 @@ function selectRoute(index){
     }
 
     userSelectedRoute=true;
+
     selectedRoute=index;
 
     routePolylines.forEach(
         function(polyline,i){
 
-            if(i===index){
+            if(
+                !polyline
+            ){
+
+                return;
+            }
+
+            if(
+                i===index
+            ){
 
                 if(
                     !alternateRoutesLayer.hasLayer(
@@ -1079,29 +3318,51 @@ function selectRoute(index){
                 }
 
                 polyline.setStyle({
+
                     weight:10,
+
                     opacity:1
                 });
 
             }else{
 
-                if(
-                    alternateRoutesLayer.hasLayer(
-                        polyline
-                    )
-                ){
+                polyline.setStyle({
 
-                    alternateRoutesLayer.removeLayer(
-                        polyline
-                    );
-                }
+                    weight:5,
+
+                    opacity:.65
+                });
             }
         }
     );
 
     renderRouteCards();
-    showRouteSummary(index);
-    loadRouteSegments(index);
+
+    showRouteSummary(
+        index
+    );
+
+    loadRouteSegments(
+        index
+    );
+
+    updateRouteAQIDisplay(
+        routeResults[index]
+    );
+
+    updateFutureAQIDisplay(
+        routeResults[index].futureAQI
+    );
+
+    if(
+        routeResults[index].originalRoute
+    ){
+
+        buildNavigationVoiceSteps(
+            routeResults[index]
+                .originalRoute
+        );
+    }
 
     if(
         navigationActive&&
@@ -1119,18 +3380,16 @@ function selectRoute(index){
         !navigationActive
     ){
 
-        map.fitBounds(
-            routePolylines[index].getBounds(),
-            {
-                padding:[30,30]
-            }
+        fitRouteToMap(
+            routeResults[index]
+                .routeCoords
         );
     }
 }
 
 
 /* =========================================================
-   DRAW ROUTE
+   DRAW ROUTE — UPDATED WITH VOICE STEPS
 ========================================================= */
 
 async function drawRoute(){
@@ -1160,10 +3419,12 @@ async function drawRoute(){
             "https://router.project-osrm.org/route/v1/driving/"+
             `${source.lng},${source.lat};`+
             `${destination.lng},${destination.lat}`+
-            "?overview=full&geometries=geojson&alternatives=true";
+            "?overview=full&geometries=geojson&steps=true&alternatives=true";
 
         const response=
-            await fetch(url);
+            await fetch(
+                url
+            );
 
         if(!response.ok){
 
@@ -1192,14 +3453,19 @@ async function drawRoute(){
             data.routes;
 
         routeResults=[];
-        routePolylines=[];
+
+        clearRoutePolylines();
 
         recommendedIndex=-1;
+
         fastestIndex=-1;
+
         selectedRoute=0;
+
         userSelectedRoute=false;
 
         alternateRoutesLayer.clearLayers();
+
         routeSegmentsLayer.clearLayers();
 
         const routeInfo=
@@ -1219,7 +3485,10 @@ async function drawRoute(){
         ];
 
         routes.forEach(
-            function(route,index){
+            function(
+                route,
+                index
+            ){
 
                 const routeLatLngs=
                     route.geometry.coordinates.map(
@@ -1236,13 +3505,16 @@ async function drawRoute(){
                     L.polyline(
                         routeLatLngs,
                         {
+
                             color:
                                 routeColors[
                                     index%
                                     routeColors.length
                                 ],
+
                             weight:5,
-                            opacity:0.7
+
+                            opacity:.7
                         }
                     );
 
@@ -1258,17 +3530,20 @@ async function drawRoute(){
                     "click",
                     function(){
 
-                        selectRoute(index);
-
+                        selectRoute(
+                            index
+                        );
                     }
                 );
             }
         );
 
-
         const routePromises=
             routes.map(
-                async function(route,index){
+                async function(
+                    route,
+                    index
+                ){
 
                     const routeCoords=
                         route.geometry.coordinates.map(
@@ -1283,7 +3558,8 @@ async function drawRoute(){
 
                     const mins=
                         (
-                            route.duration/60
+                            route.duration/
+                            60
                         ).toFixed(1);
 
                     let aqiData={
@@ -1297,20 +3573,23 @@ async function drawRoute(){
                         average_aqi:null
                     };
 
-
                     try{
 
                         const response=
                             await fetch(
                                 "/route_aqi",
                                 {
+
                                     method:"POST",
+
                                     headers:{
                                         "Content-Type":
                                             "application/json"
                                     },
+
                                     body:
                                         JSON.stringify({
+
                                             route:
                                                 routeCoords,
 
@@ -1329,7 +3608,8 @@ async function drawRoute(){
 
                             if(result){
 
-                                aqiData=result;
+                                aqiData=
+                                    result;
                             }
                         }
 
@@ -1341,20 +3621,23 @@ async function drawRoute(){
                         );
                     }
 
-
                     try{
 
                         const response=
                             await fetch(
                                 "/future_route_aqi",
                                 {
+
                                     method:"POST",
+
                                     headers:{
                                         "Content-Type":
                                             "application/json"
                                     },
+
                                     body:
                                         JSON.stringify({
+
                                             route:
                                                 routeCoords,
 
@@ -1373,7 +3656,8 @@ async function drawRoute(){
 
                             if(result){
 
-                                futureAQI=result;
+                                futureAQI=
+                                    result;
                             }
                         }
 
@@ -1384,7 +3668,6 @@ async function drawRoute(){
                             error
                         );
                     }
-
 
                     const averageAQI=
                         Number(
@@ -1408,7 +3691,8 @@ async function drawRoute(){
 
                         distance:
                             (
-                                route.distance/1000
+                                route.distance/
+                                1000
                             ).toFixed(2),
 
                         time:
@@ -1419,27 +3703,27 @@ async function drawRoute(){
                                 averageAQI
                             )
                             ?
-                                averageAQI
+                            averageAQI
                             :
-                                0,
+                            0,
 
                         maxAQI:
                             Number.isFinite(
                                 maxAQI
                             )
                             ?
-                                maxAQI
+                            maxAQI
                             :
-                                0,
+                            0,
 
                         exposure:
                             Number.isFinite(
                                 exposure
                             )
                             ?
-                                exposure
+                            exposure
                             :
-                                0,
+                            0,
 
                         category:
                             aqiData.category||
@@ -1459,22 +3743,44 @@ async function drawRoute(){
                 }
             );
 
-
         routeResults=
             await Promise.all(
                 routePromises
             );
 
 
+        /* =====================================================
+           BUILD VOICE STEPS FROM ROUTE
+        ===================================================== */
+
+        if(
+            routeResults.length>0
+        ){
+
+            buildNavigationVoiceSteps(
+                routeResults[0]
+                    .originalRoute
+            );
+        }
+
+
+        /* =====================================================
+           FIND RECOMMENDED + FASTEST
+        ===================================================== */
+
         if(
             routeResults.length>0
         ){
 
             recommendedIndex=0;
+
             fastestIndex=0;
 
             routeResults.forEach(
-                function(route,index){
+                function(
+                    route,
+                    index
+                ){
 
                     if(
                         route.exposure<
@@ -1488,7 +3794,9 @@ async function drawRoute(){
                     }
 
                     if(
-                        parseFloat(route.time)<
+                        parseFloat(
+                            route.time
+                        )<
                         parseFloat(
                             routeResults[
                                 fastestIndex
@@ -1506,6 +3814,11 @@ async function drawRoute(){
 
         renderRouteCards();
 
+
+        /* =====================================================
+           SELECT RECOMMENDED ROUTE
+        ===================================================== */
+
         if(
             recommendedIndex>=0&&
             routePolylines[
@@ -1519,12 +3832,32 @@ async function drawRoute(){
             routePolylines[
                 recommendedIndex
             ].setStyle({
+
                 weight:10,
+
                 opacity:1
             });
 
+            buildNavigationVoiceSteps(
+                routeResults[
+                    recommendedIndex
+                ].originalRoute
+            );
+
             showRouteSummary(
                 recommendedIndex
+            );
+
+            updateRouteAQIDisplay(
+                routeResults[
+                    recommendedIndex
+                ]
+            );
+
+            updateFutureAQIDisplay(
+                routeResults[
+                    recommendedIndex
+                ].futureAQI
             );
 
             loadRouteSegments(
@@ -1532,6 +3865,10 @@ async function drawRoute(){
             );
         }
 
+
+        /* =====================================================
+           FIT MAP
+        ===================================================== */
 
         if(
             routePolylines.length>0
@@ -1542,20 +3879,25 @@ async function drawRoute(){
                     routePolylines
                 ).getBounds();
 
-            if(bounds.isValid()){
+            if(
+                bounds.isValid()
+            ){
 
                 map.fitBounds(
                     bounds,
                     {
-                        padding:[30,30]
+                        padding:[
+                            30,
+                            30
+                        ]
                     }
                 );
             }
         }
 
+
         closeSidebarAfterRoute();
 
-        startNavigation();
 
     }catch(error){
 
@@ -1580,1490 +3922,1327 @@ async function drawRoute(){
 
 
 /* =========================================================
-   ROUTE SUMMARY STYLES
+   START NAVIGATION FROM SELECTED ROUTE
 ========================================================= */
 
-function injectRouteSummaryStyles(){
+function startSelectedRouteNavigation(){
+
+    if(
+        !routeResults[
+            selectedRoute
+        ]
+    ){
+
+        return;
+    }
+
+    if(
+        navigationActive
+    ){
+
+        stopNavigation(false);
+    }
+
+    const route=
+        routeResults[
+            selectedRoute
+        ];
+
+    if(
+        !route.routeCoords||
+        route.routeCoords.length<2
+    ){
+
+        return;
+    }
+
+    if(
+        route.originalRoute
+    ){
+
+        buildNavigationVoiceSteps(
+            route.originalRoute
+        );
+    }
+
+    startNavigation();
+}
+
+
+/* =========================================================
+   NAVIGATION BUTTON
+========================================================= */
+
+function createNavigationButton(){
 
     if(
         document.getElementById(
-            "routeSummaryProfessionalStyles"
+            "startNavigationBtn"
         )
     ){
 
         return;
     }
 
-    const style=
+    const button=
         document.createElement(
-            "style"
+            "button"
         );
 
-    style.id=
-        "routeSummaryProfessionalStyles";
+    button.id=
+        "startNavigationBtn";
 
-    style.textContent=`
+    button.type=
+        "button";
 
-#routeSummary{
+    button.textContent=
+        "▶ Start Navigation";
 
-position:fixed!important;
+    button.style.cssText=`
 
-left:18px!important;
+        position:fixed;
 
-right:auto!important;
+        left:50%;
 
-top:auto!important;
+        bottom:20px;
 
-bottom:18px!important;
+        transform:
+            translateX(-50%);
 
-width:350px!important;
+        z-index:4500;
 
-max-width:calc(100vw - 36px)!important;
+        min-width:180px;
 
-max-height:calc(100vh - 36px);
+        height:44px;
 
-box-sizing:border-box;
+        padding:0 18px;
 
-margin:0!important;
+        border:0;
 
-padding:0!important;
+        border-radius:22px;
 
-overflow:hidden;
+        background:
+            #1976e8;
 
-z-index:4000!important;
+        color:#fff;
 
-background:rgba(15,23,42,.94)!important;
+        font-size:13px;
 
-border:1px solid rgba(148,163,184,.18)!important;
+        font-weight:750;
 
-border-radius:18px!important;
+        cursor:pointer;
 
-box-shadow:0 18px 45px rgba(0,0,0,.34)!important;
+        box-shadow:
+            0 8px 25px
+            rgba(0,0,0,.35);
 
-backdrop-filter:blur(14px);
+    `;
 
--webkit-backdrop-filter:blur(14px);
-
-color:#f8fafc;
-
-transform:none!important;
-
-}
-
-#routeSummary h3{
-
-margin:0!important;
-
-padding:17px 52px 14px 18px!important;
-
-font-size:17px!important;
-
-line-height:1.2!important;
-
-font-weight:750!important;
-
-color:#f8fafc!important;
-
-border-bottom:1px solid rgba(148,163,184,.13)!important;
-
-}
-
-#summaryContent{
-
-padding:4px 18px 17px!important;
-
-box-sizing:border-box;
-
-color:#cbd5e1;
-
-}
-
-#summaryContent .summary-row{
-
-min-height:39px;
-
-display:flex;
-
-align-items:center;
-
-justify-content:space-between;
-
-gap:15px;
-
-border-bottom:1px solid rgba(148,163,184,.10);
-
-font-size:12px;
-
-line-height:1.3;
-
-}
-
-#summaryContent .summary-row span{
-
-color:#aeb9c9;
-
-font-weight:500;
-
-}
-
-#summaryContent .summary-row b{
-
-color:#f1f5f9;
-
-font-weight:750;
-
-text-align:right;
-
-white-space:nowrap;
-
-}
-
-#summaryContent #detailsBtn{
-
-width:100%;
-
-height:40px;
-
-margin-top:7px;
-
-border:0;
-
-border-radius:10px;
-
-background:#1976e8;
-
-color:#fff;
-
-font-size:12px;
-
-font-weight:750;
-
-cursor:pointer;
-
-}
-
-#routeSummaryMinimizeBtn{
-
-position:absolute!important;
-
-top:10px!important;
-
-right:10px!important;
-
-width:30px!important;
-
-height:30px!important;
-
-display:flex!important;
-
-align-items:center!important;
-
-justify-content:center!important;
-
-padding:0!important;
-
-border:1px solid rgba(148,163,184,.20)!important;
-
-border-radius:8px!important;
-
-background:rgba(30,41,59,.88)!important;
-
-color:#cbd5e1!important;
-
-font-size:19px!important;
-
-cursor:pointer!important;
-
-z-index:50!important;
-
-}
-
-#routeSummaryRestoreBtn{
-
-position:fixed!important;
-
-left:18px!important;
-
-right:auto!important;
-
-bottom:18px!important;
-
-min-width:128px!important;
-
-height:40px!important;
-
-padding:0 16px!important;
-
-display:none;
-
-align-items:center!important;
-
-justify-content:center!important;
-
-border:1px solid rgba(59,130,246,.35)!important;
-
-border-radius:10px!important;
-
-background:rgba(15,23,42,.96)!important;
-
-color:#e2e8f0!important;
-
-box-shadow:0 10px 28px rgba(0,0,0,.30)!important;
-
-font-size:12px!important;
-
-font-weight:700!important;
-
-cursor:pointer!important;
-
-z-index:4001!important;
-
-backdrop-filter:blur(12px);
-
-}
-
-@media(max-width:800px){
-
-#routeSummary{
-
-left:12px!important;
-
-right:12px!important;
-
-bottom:12px!important;
-
-width:auto!important;
-
-max-width:none!important;
-
-max-height:calc(100vh - 90px);
-
-border-radius:16px!important;
-
-}
-
-#routeSummary h3{
-
-padding:15px 48px 13px 15px!important;
-
-font-size:16px!important;
-
-}
-
-#summaryContent{
-
-padding:2px 15px 14px!important;
-
-}
-
-#summaryContent .summary-row{
-
-min-height:36px;
-
-font-size:11px;
-
-}
-
-#summaryContent #detailsBtn{
-
-height:39px;
-
-}
-
-#routeSummaryMinimizeBtn{
-
-top:8px!important;
-
-right:8px!important;
-
-width:28px!important;
-
-height:28px!important;
-
-}
-
-#routeSummaryRestoreBtn{
-
-left:12px!important;
-
-bottom:12px!important;
-
-min-width:112px!important;
-
-height:38px!important;
-
-}
-
-}
-
-`;
-
-    document.head.appendChild(
-        style
-    );
-}
-
-
-/* =========================================================
-   SUMMARY CONTROLS
-========================================================= */
-
-function setupRouteSummaryControls(){
-
-    injectRouteSummaryStyles();
-
-    const routeSummary=
-        document.getElementById(
-            "routeSummary"
-        );
-
-    if(!routeSummary){
-
-        return;
-    }
-
-    let minimizeButton=
-        document.getElementById(
-            "routeSummaryMinimizeBtn"
-        );
-
-    if(!minimizeButton){
-
-        minimizeButton=
-            document.createElement(
-                "button"
-            );
-
-        minimizeButton.id=
-            "routeSummaryMinimizeBtn";
-
-        minimizeButton.type=
-            "button";
-
-        minimizeButton.textContent=
-            "−";
-
-        minimizeButton.addEventListener(
-            "click",
-            function(event){
-
-                event.preventDefault();
-                event.stopPropagation();
-
-                minimizeRouteSummary();
-            }
-        );
-
-        routeSummary.appendChild(
-            minimizeButton
-        );
-    }
-
-
-    let restoreButton=
-        document.getElementById(
-            "routeSummaryRestoreBtn"
-        );
-
-    if(!restoreButton){
-
-        restoreButton=
-            document.createElement(
-                "button"
-            );
-
-        restoreButton.id=
-            "routeSummaryRestoreBtn";
-
-        restoreButton.type=
-            "button";
-
-        restoreButton.textContent=
-            "Route Summary";
-
-        restoreButton.addEventListener(
-            "click",
-            function(event){
-
-                event.preventDefault();
-                event.stopPropagation();
-
-                restoreRouteSummary();
-            }
-        );
-
-        document.body.appendChild(
-            restoreButton
-        );
-    }
-}
-
-
-function minimizeRouteSummary(){
-
-    const routeSummary=
-        document.getElementById(
-            "routeSummary"
-        );
-
-    const restoreButton=
-        document.getElementById(
-            "routeSummaryRestoreBtn"
-        );
-
-    if(!routeSummary){
-
-        return;
-    }
-
-    routeSummaryMinimized=true;
-
-    routeSummary.style.setProperty(
-        "display",
-        "none",
-        "important"
-    );
-
-    if(restoreButton){
-
-        restoreButton.style.setProperty(
-            "display",
-            "flex",
-            "important"
-        );
-    }
-}
-
-
-function restoreRouteSummary(){
-
-    const routeSummary=
-        document.getElementById(
-            "routeSummary"
-        );
-
-    const restoreButton=
-        document.getElementById(
-            "routeSummaryRestoreBtn"
-        );
-
-    if(!routeSummary){
-
-        return;
-    }
-
-    routeSummaryMinimized=false;
-
-    routeSummary.style.setProperty(
-        "display",
-        "block",
-        "important"
-    );
-
-    if(restoreButton){
-
-        restoreButton.style.setProperty(
-            "display",
-            "none",
-            "important"
-        );
-    }
-}
-
-
-/* =========================================================
-   ROUTE SUMMARY
-========================================================= */
-
-function showRouteSummary(index){
-
-    if(
-        !routeResults[index]
-    ){
-
-        return;
-    }
-
-    const route=
-        routeResults[index];
-
-    const aqi=
-        Number(
-            route.averageAQI
-        );
-
-    const maxAQI=
-        Number(
-            route.maxAQI
-        );
-
-    const category=
-        route.category||
-        getAQICategory(
-            aqi
-        );
-
-    const summaryContent=
-        document.getElementById(
-            "summaryContent"
-        );
-
-    const routeSummary=
-        document.getElementById(
-            "routeSummary"
-        );
-
-    if(
-        !summaryContent||
-        !routeSummary
-    ){
-
-        return;
-    }
-
-    summaryContent.innerHTML=
-        "<div class='summary-row'>"+
-        "<span>Distance</span>"+
-        "<b>"+
-        Number(route.distance).toFixed(2)+
-        " km"+
-        "</b>"+
-        "</div>"+
-
-        "<div class='summary-row'>"+
-        "<span>Travel Time</span>"+
-        "<b>"+
-        route.time+
-        " mins"+
-        "</b>"+
-        "</div>"+
-
-        "<div class='summary-row'>"+
-        "<span>Average AQI</span>"+
-        "<b>"+
-        Math.round(aqi)+
-        "</b>"+
-        "</div>"+
-
-        "<div class='summary-row'>"+
-        "<span>Maximum AQI</span>"+
-        "<b>"+
-        Math.round(maxAQI)+
-        "</b>"+
-        "</div>"+
-
-        "<div class='summary-row'>"+
-        "<span>Status</span>"+
-        "<b>"+
-        category+
-        "</b>"+
-        "</div>"+
-
-        "<button id='detailsBtn'>"+
-        "View Details"+
-        "</button>";
-
-    setupRouteSummaryControls();
-
-    routeSummaryMinimized=false;
-
-    routeSummary.style.setProperty(
-        "display",
-        "block",
-        "important"
-    );
-
-    const restoreButton=
-        document.getElementById(
-            "routeSummaryRestoreBtn"
-        );
-
-    if(restoreButton){
-
-        restoreButton.style.setProperty(
-            "display",
-            "none",
-            "important"
-        );
-    }
-
-    const detailsBtn=
-        document.getElementById(
-            "detailsBtn"
-        );
-
-    if(!detailsBtn){
-
-        return;
-    }
-
-    detailsBtn.onclick=
+    button.addEventListener(
+        "click",
         function(){
 
-            const modal=
-                document.getElementById(
-                    "detailsModal"
-                );
+            startSelectedRouteNavigation();
 
-            const detailsContent=
-                document.getElementById(
-                    "detailsContent"
-                );
-
-            if(
-                !modal||
-                !detailsContent
-            ){
-
-                return;
-            }
-
-            modal.style.display=
-                "block";
-
-            const futureAQI=
-                route.futureAQI||
-                {};
-
-            const futureAverageAQI=
-                Number(
-                    futureAQI.average_aqi
-                );
-
-            detailsContent.innerHTML=`
-
-<div class="detailsHeader">
-Route Details
-</div>
-
-<div class="detailRow">
-<span>Distance</span>
-<b>
-${Number(route.distance).toFixed(2)}
-km
-</b>
-</div>
-
-<div class="detailRow">
-<span>Travel Time</span>
-<b>
-${route.time} mins
-</b>
-</div>
-
-<div class="detailRow">
-<span>Average AQI</span>
-<b>
-${Math.round(aqi)}
-</b>
-</div>
-
-<div class="detailRow">
-<span>Maximum AQI</span>
-<b>
-${Math.round(maxAQI)}
-</b>
-</div>
-
-<div class="detailRow">
-<span>Exposure</span>
-<b>
-${Math.round(Number(route.exposure)||0)}
-</b>
-</div>
-
-<div class="detailRow">
-<span>Future AQI</span>
-<b>
-${
-Number.isFinite(
-futureAverageAQI
-)
-?
-Math.round(
-futureAverageAQI
-)
-:
-"N/A"
-}
-</b>
-</div>
-
-<div class="detailRow">
-<span>AQI Status</span>
-<b>
-${category}
-</b>
-</div>
-
-<hr>
-
-<div class="healthCard">
-${getHealthAdvice(category)}
-</div>
-
-`;
-        };
-}
-
-
-/* =========================================================
-   ROUTE SEGMENTS
-========================================================= */
-
-async function loadRouteSegments(index){
-
-    if(
-        !routeResults[index]
-    ){
-
-        return;
-    }
-
-    const route=
-        routeResults[index];
-
-    const routeCoords=
-        route.routeCoords;
-
-    if(
-        !routeCoords||
-        routeCoords.length<2
-    ){
-
-        return;
-    }
-
-    try{
-
-        const response=
-            await fetch(
-                "/route_segments",
-                {
-                    method:"POST",
-                    headers:{
-                        "Content-Type":
-                            "application/json"
-                    },
-                    body:
-                        JSON.stringify({
-                            route:
-                                routeCoords
-                        })
-                }
-            );
-
-        if(!response.ok){
-
-            return;
         }
-
-        const segmentData=
-            await response.json();
-
-        if(
-            !Array.isArray(segmentData)||
-            segmentData.length<2
-        ){
-
-            return;
-        }
-
-        if(
-            index!==selectedRoute
-        ){
-
-            return;
-        }
-
-        routeSegmentsLayer.clearLayers();
-
-        for(
-            let i=0;
-            i<segmentData.length-1;
-            i++
-        ){
-
-            const p1=
-                segmentData[i];
-
-            const p2=
-                segmentData[i+1];
-
-            const segment=
-                L.polyline(
-                    [
-                        [
-                            p1.lat,
-                            p1.lon
-                        ],
-                        [
-                            p2.lat,
-                            p2.lon
-                        ]
-                    ],
-                    {
-                        color:
-                            getAQIColor(
-                                p1.aqi
-                            ),
-                        weight:8,
-                        opacity:1
-                    }
-                );
-
-            segment.bindPopup(
-                "<b>Segment AQI</b><br>"+
-                "AQI: "+
-                Math.round(
-                    Number(p1.aqi)
-                )
-            );
-
-            routeSegmentsLayer.addLayer(
-                segment
-            );
-        }
-
-    }catch(error){
-
-        console.error(
-            "Route segment error:",
-            error
-        );
-    }
-}
-
-
-/* =========================================================
-   GEOCODING
-========================================================= */
-
-async function geocode(place){
-
-    /*
-       IMPORTANT:
-       RNS is hard-coded here as well as in the backend.
-
-       This prevents the selected autocomplete text from
-       being sent to another geocoder and returning a
-       different RNS location.
-    */
-
-    const normalizedPlace=
-        String(
-            place||""
-        )
-        .trim()
-        .toLowerCase();
-
-    if(
-        normalizedPlace.includes(
-            "rns institute of technology"
-        )||
-        normalizedPlace.includes(
-            "rnsit"
-        )||
-        normalizedPlace==="rns"
-    ){
-
-        return{
-            lat:12.900733,
-            lng:77.518175
-        };
-    }
-
-
-    const url=
-        "/geocode?q="+
-        encodeURIComponent(
-            place
-        );
-
-    const response=
-        await fetch(
-            url
-        );
-
-    if(!response.ok){
-
-        throw new Error(
-            "Geocoding failed: HTTP "+
-            response.status
-        );
-    }
-
-    const data=
-        await response.json();
-
-    if(
-        !Array.isArray(data)||
-        data.length===0
-    ){
-
-        throw new Error(
-            "Location not found"
-        );
-    }
-
-    const lat=
-        parseFloat(
-            data[0].lat
-        );
-
-    const lng=
-        parseFloat(
-            data[0].lon
-        );
-
-    if(
-        !Number.isFinite(lat)||
-        !Number.isFinite(lng)
-    ){
-
-        throw new Error(
-            "Invalid coordinates"
-        );
-    }
-
-    return{
-        lat:lat,
-        lng:lng
-    };
-}
-
-
-/* =========================================================
-   FIND ROUTE
-========================================================= */
-
-async function findRoute(){
-
-    try{
-
-        userSelectedRoute=false;
-
-        recommendedIndex=-1;
-        fastestIndex=-1;
-        selectedRoute=0;
-
-        const sourceInput=
-            document.getElementById(
-                "sourceInput"
-            );
-
-        const destinationInput=
-            document.getElementById(
-                "destinationInput"
-            );
-
-        if(
-            !sourceInput||
-            !destinationInput
-        ){
-
-            return;
-        }
-
-        const destinationText=
-            destinationInput.value.trim();
-
-        if(!destinationText){
-
-            alert(
-                "Enter destination"
-            );
-
-            return;
-        }
-
-        const loadingOverlay=
-            document.getElementById(
-                "loadingOverlay"
-            );
-
-        if(loadingOverlay){
-
-            loadingOverlay.style.display=
-                "flex";
-        }
-
-        const position=
-            await new Promise(
-                function(resolve,reject){
-
-                    if(
-                        !navigator.geolocation
-                    ){
-
-                        reject(
-                            new Error(
-                                "Geolocation is not supported"
-                            )
-                        );
-
-                        return;
-                    }
-
-                    navigator.geolocation.getCurrentPosition(
-                        resolve,
-                        reject,
-                        {
-                            enableHighAccuracy:true,
-                            timeout:15000,
-                            maximumAge:0
-                        }
-                    );
-                }
-            );
-
-        source={
-            lat:
-                position.coords.latitude,
-
-            lng:
-                position.coords.longitude
-        };
-
-
-        /*
-           RNS will ALWAYS use the exact hard-coded
-           coordinates above.
-        */
-
-        destination=
-            await geocode(
-                destinationText
-            );
-
-
-        if(sourceMarker){
-
-            map.removeLayer(
-                sourceMarker
-            );
-
-            sourceMarker=null;
-        }
-
-        if(destinationMarker){
-
-            map.removeLayer(
-                destinationMarker
-            );
-
-            destinationMarker=null;
-        }
-
-        sourceMarker=
-            L.marker(
-                source
-            )
-            .addTo(map)
-            .bindPopup(
-                "Source"
-            );
-
-        destinationMarker=
-            L.marker(
-                destination
-            )
-            .addTo(map)
-            .bindPopup(
-                "Destination"
-            );
-
-        await drawRoute();
-
-    }catch(error){
-
-        console.error(
-            "Find route error:",
-            error
-        );
-
-        const loadingOverlay=
-            document.getElementById(
-                "loadingOverlay"
-            );
-
-        if(loadingOverlay){
-
-            loadingOverlay.style.display=
-                "none";
-        }
-
-        if(
-            error&&
-            error.code===1
-        ){
-
-            alert(
-                "Please allow location access to get your current location"
-            );
-
-        }else if(
-            error&&
-            error.code===2
-        ){
-
-            alert(
-                "Unable to get your current location"
-            );
-
-        }else if(
-            error&&
-            error.code===3
-        ){
-
-            alert(
-                "Location request timed out"
-            );
-
-        }else{
-
-            alert(
-                "Location not found"
-            );
-        }
-    }
-}
-
-
-/* =========================================================
-   CLEAR ROUTE
-========================================================= */
-
-function clearRoute(){
-
-    stopNavigation(
-        false
     );
 
-    if(sourceMarker){
-
-        map.removeLayer(
-            sourceMarker
-        );
-
-        sourceMarker=null;
-    }
-
-    if(destinationMarker){
-
-        map.removeLayer(
-            destinationMarker
-        );
-
-        destinationMarker=null;
-    }
-
-    alternateRoutesLayer.clearLayers();
-    routeSegmentsLayer.clearLayers();
-
-    source=null;
-    destination=null;
-
-    routeResults=[];
-    routePolylines=[];
-
-    userSelectedRoute=false;
-
-    recommendedIndex=-1;
-    fastestIndex=-1;
-    selectedRoute=0;
-
-    const routeInfo=
-        document.getElementById(
-            "routeInfo"
-        );
-
-    if(routeInfo){
-
-        routeInfo.innerHTML=
-            "Enter source and destination";
-    }
-
-    const routeSummary=
-        document.getElementById(
-            "routeSummary"
-        );
-
-    if(routeSummary){
-
-        routeSummary.style.setProperty(
-            "display",
-            "none",
-            "important"
-        );
-    }
-
-    routeSummaryMinimized=false;
-
-    const restoreButton=
-        document.getElementById(
-            "routeSummaryRestoreBtn"
-        );
-
-    if(restoreButton){
-
-        restoreButton.style.setProperty(
-            "display",
-            "none",
-            "important"
-        );
-    }
-
-    const detailsModal=
-        document.getElementById(
-            "detailsModal"
-        );
-
-    if(detailsModal){
-
-        detailsModal.style.display=
-            "none";
-    }
-
-    if(
-        window.innerWidth<=800&&
-        typeof openMobileSidebar==="function"
-    ){
-
-        openMobileSidebar();
-    }
+    document.body.appendChild(
+        button
+    );
 }
 
 
 /* =========================================================
-   HEALTH ADVICE
+   NAVIGATION BUTTON STATE
 ========================================================= */
 
-function getHealthAdvice(
-    category
-){
+function updateNavigationButton(){
 
-    switch(category){
-
-        case"Good":
-
-            return(
-                "<hr>"+
-                "<b>Health Advisory</b><br>"+
-                "Air quality is excellent. "+
-                "Safe for everyone."
-            );
-
-        case"Satisfactory":
-
-            return(
-                "<hr>"+
-                "<b>Health Advisory</b><br>"+
-                "Air quality is acceptable. "+
-                "Normal outdoor activities."
-            );
-
-        case"Moderate":
-
-            return(
-                "<hr>"+
-                "<b>Health Advisory</b><br>"+
-                "Sensitive groups should reduce "+
-                "prolonged outdoor activity. "+
-                "N95 mask recommended."
-            );
-
-        case"Poor":
-
-            return(
-                "<hr>"+
-                "<b>Health Advisory</b><br>"+
-                "Reduce outdoor exposure. "+
-                "N95 mask recommended."
-            );
-
-        case"Very Poor":
-
-            return(
-                "<hr>"+
-                "<b>Health Advisory</b><br>"+
-                "Avoid outdoor exercise. "+
-                "Stay indoors whenever possible."
-            );
-
-        case"Severe":
-
-            return(
-                "<hr>"+
-                "<b>Health Advisory</b><br>"+
-                "Hazardous air quality. "+
-                "Avoid going outdoors."
-            );
-
-        default:
-
-            return"";
-    }
-}
-
-
-/* =========================================================
-   ROUTE CARDS
-========================================================= */
-
-function renderRouteCards(){
-
-    const routeInfo=
+    const button=
         document.getElementById(
-            "routeInfo"
+            "startNavigationBtn"
         );
 
-    if(!routeInfo){
+    if(!button){
 
         return;
     }
 
-    let html="";
+    if(navigationActive){
 
-    routeResults.forEach(
-        function(route,index){
+        button.textContent=
+            "■ Stop Navigation";
 
-            let badge=
-                "Alternative Route";
+        button.style.background=
+            "#dc2626";
 
-            let badgeColor=
-                "#757575";
+    }else{
 
-            if(
-                index===recommendedIndex
-            ){
+        button.textContent=
+            "▶ Start Navigation";
 
-                badge=
-                    "Recommended";
+        button.style.background=
+            "#1976e8";
+    }
+}
 
-                badgeColor=
-                    "#2E7D32";
 
-            }else if(
-                index===fastestIndex
-            ){
+/* =========================================================
+   NAVIGATION BUTTON HANDLER
+========================================================= */
 
-                badge=
-                    "Fastest";
+function handleNavigationButton(){
 
-                badgeColor=
-                    "#1565C0";
-            }
+    if(
+        navigationActive
+    ){
 
-            const aqiValue=
+        stopNavigation(false);
+
+    }else{
+
+        startSelectedRouteNavigation();
+    }
+
+    updateNavigationButton();
+}
+
+
+/* =========================================================
+   PATCH NAVIGATION STATE
+========================================================= */
+
+const originalStartNavigation=
+    startNavigation;
+
+const originalStopNavigation=
+    stopNavigation;
+
+            const routeDistance=
+                Number(
+                    route.distance
+                );
+
+            const routeTime=
+                Number(
+                    route.time
+                );
+
+            const routeAQI=
                 Number(
                     route.averageAQI
                 );
 
-            const safeAQI=
-                Number.isFinite(
-                    aqiValue
-                )
-                ?
-                    aqiValue
-                :
-                    0;
-
-            const aqiColor=
-                getAQIColor(
-                    safeAQI
-                );
-
-            const aqiText=
-                getAQICategory(
-                    safeAQI
-                );
-
-            const isActive=
-                selectedRoute===index;
-
             html+=`
+                <div
+                    class="routeOption ${isActive ? "activeRoute" : ""}"
+                    onclick="selectRoute(${index})"
+                    style="cursor:pointer;"
+                >
 
-<div
-class="routeOption ${
-isActive
-?"activeRoute"
-:""
-}"
-onclick="selectRoute(${index})"
-style="cursor:pointer;"
->
+                    <div
+                        class="routeBadge"
+                        style="
+                            background:${badgeColor};
+                            color:#fff;
+                            padding:4px 8px;
+                            border-radius:8px;
+                            display:inline-block;
+                            font-size:10px;
+                            font-weight:700;
+                            margin-bottom:7px;
+                        "
+                    >
+                        ${badge}
+                    </div>
 
-<div
-class="routeBadge"
-style="
-background:${badgeColor};
-"
->
-${badge}
-</div>
+                    <div
+                        style="
+                            display:flex;
+                            justify-content:space-between;
+                            align-items:center;
+                            gap:10px;
+                        "
+                    >
 
-<div
-class="aqiBadge"
-style="
-background:${aqiColor};
-"
->
-AQI
-${Math.round(safeAQI)}
-</div>
+                        <div>
 
-<div class="aqiText">
-${aqiText}
-</div>
+                            <div
+                                style="
+                                    font-size:14px;
+                                    font-weight:700;
+                                "
+                            >
+                                Route ${index+1}
+                            </div>
 
-<div class="routeMeta">
-${route.distance} km
-&nbsp;&nbsp;
-${route.time} mins
-</div>
+                            <div
+                                style="
+                                    font-size:11px;
+                                    opacity:.75;
+                                    margin-top:3px;
+                                "
+                            >
+                                ${
+                                    Number.isFinite(
+                                        routeDistance
+                                    )
+                                    ?
+                                    routeDistance.toFixed(2)
+                                    :
+                                    "—"
+                                }
+                                km
+                                ·
+                                ${
+                                    Number.isFinite(
+                                        routeTime
+                                    )
+                                    ?
+                                    routeTime.toFixed(1)
+                                    :
+                                    "—"
+                                }
+                                min
+                            </div>
 
-<div class="routeExposure">
-Exposure
-${Math.round(
-Number(route.exposure)||0
-)}
-</div>
+                        </div>
 
-</div>
+                        <div
+                            style="
+                                text-align:right;
+                            "
+                        >
 
-`;
+                            <div
+                                style="
+                                    font-size:18px;
+                                    font-weight:800;
+                                    color:${aqiColor};
+                                "
+                            >
+                                ${
+                                    Number.isFinite(
+                                        routeAQI
+                                    )
+                                    ?
+                                    Math.round(
+                                        routeAQI
+                                    )
+                                    :
+                                    0
+                                }
+                            </div>
+
+                            <div
+                                style="
+                                    font-size:9px;
+                                    opacity:.75;
+                                "
+                            >
+                                ${aqiText}
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                </div>
+            `;
         }
     );
 
     routeInfo.innerHTML=
         html;
+}
 
-    const closeModal=
-        document.getElementById(
-            "closeModal"
+
+/* =========================================================
+   ROUTE SELECTION
+========================================================= */
+
+function selectRoute(
+    index
+){
+
+    if(
+        !routeResults[index]||
+        !routePolylines[index]
+    ){
+
+        return;
+    }
+
+    userSelectedRoute=true;
+
+    selectedRoute=index;
+
+    routePolylines.forEach(
+        function(
+            polyline,
+            i
+        ){
+
+            if(!polyline){
+
+                return;
+            }
+
+            if(
+                i===index
+            ){
+
+                polyline.setStyle({
+
+                    weight:10,
+
+                    opacity:1
+                });
+
+            }else{
+
+                polyline.setStyle({
+
+                    weight:5,
+
+                    opacity:.65
+                });
+            }
+        }
+    );
+
+    renderRouteCards();
+
+    showRouteSummary(
+        index
+    );
+
+    updateRouteAQIDisplay(
+        routeResults[index]
+    );
+
+    updateFutureAQIDisplay(
+        routeResults[index]
+            .futureAQI
+    );
+
+    loadRouteSegments(
+        index
+    );
+
+
+    /* =====================================================
+       VOICE STEPS FOR SELECTED ROUTE
+    ===================================================== */
+
+    if(
+        routeResults[index]
+            .originalRoute
+    ){
+
+        buildNavigationVoiceSteps(
+            routeResults[index]
+                .originalRoute
         );
+    }
 
-    if(closeModal){
 
-        closeModal.onclick=
-            function(){
+    if(
+        navigationActive
+    ){
 
-                const modal=
-                    document.getElementById(
-                        "detailsModal"
-                    );
+        if(
+            routeResults[index]
+                .routeCoords
+        ){
 
-                if(modal){
+            drawNavigationRoute(
+                routeResults[index]
+                    .routeCoords
+            );
+        }
 
-                    modal.style.display=
-                        "none";
-                }
-            };
+    }else{
+
+        fitRouteToMap(
+            routeResults[index]
+                .routeCoords
+        );
     }
 }
 
 
+/* =========================================================
+   MAP CLICK ROUTING
+========================================================= */
+
+let routeMapClickMode=
+    null;
+
+
+function enableSourceSelection(){
+
+    routeMapClickMode=
+        "source";
+
+    if(
+        typeof map!=="undefined"&&
+        map
+    ){
+
+        map.getContainer()
+            .style.cursor=
+            "crosshair";
+    }
+}
+
+
+function enableDestinationSelection(){
+
+    routeMapClickMode=
+        "destination";
+
+    if(
+        typeof map!=="undefined"&&
+        map
+    ){
+
+        map.getContainer()
+            .style.cursor=
+            "crosshair";
+    }
+}
+
+
+function disableMapClickRouting(){
+
+    routeMapClickMode=
+        null;
+
+    if(
+        typeof map!=="undefined"&&
+        map
+    ){
+
+        map.getContainer()
+            .style.cursor=
+            "";
+    }
+}
+
+
+if(
+    typeof map!=="undefined"&&
+    map
+){
+
+    map.on(
+        "click",
+        function(event){
+
+            if(
+                !routeMapClickMode
+            ){
+
+                return;
+            }
+
+            const lat=
+                event.latlng.lat;
+
+            const lng=
+                event.latlng.lng;
+
+            if(
+                routeMapClickMode===
+                "source"
+            ){
+
+                setSource(
+                    lat,
+                    lng
+                );
+
+            }else if(
+                routeMapClickMode===
+                "destination"
+            ){
+
+                setDestination(
+                    lat,
+                    lng
+                );
+            }
+
+            disableMapClickRouting();
+        }
+    );
+}
+
+
+/* =========================================================
+   GPS FOLLOW MODE
+========================================================= */
+
+function enableNavigationFollow(){
+
+    if(
+        navigationActive
+    ){
+
+        navigationFollowMode=
+            true;
+    }
+}
+
+
+function disableNavigationFollow(){
+
+    navigationFollowMode=
+        false;
+}
+
+
+/* =========================================================
+   RECENTER NAVIGATION
+========================================================= */
+
+function recenterNavigation(){
+
+    if(
+        !navigationActive
+    ){
+
+        recenterMap();
+
+        return;
+    }
+
+    navigationFollowMode=
+        true;
+
+    if(
+        lastKnownNavigationPosition
+    ){
+
+        map.setView(
+            [
+                lastKnownNavigationPosition.lat,
+                lastKnownNavigationPosition.lng
+            ],
+            Math.max(
+                map.getZoom(),
+                17
+            ),
+            {
+                animate:true
+            }
+        );
+    }
+}
+
+
+/* =========================================================
+   SATELLITE CONTROL POSITION
+========================================================= */
+
+function updateSatelliteControlPosition(){
+
+    if(
+        !satelliteControl
+    ){
+
+        return;
+    }
+
+    const layers=
+        document.querySelector(
+            ".leaflet-control-layers"
+        );
+
+    const recenter=
+        document.getElementById(
+            "recenterMapBtn"
+        );
+
+    if(layers){
+
+        const rect=
+            layers.getBoundingClientRect();
+
+        satelliteControl.style.top=
+            (
+                rect.bottom+
+                10
+            )+
+            "px";
+    }else if(recenter){
+
+        const rect=
+            recenter.getBoundingClientRect();
+
+        satelliteControl.style.top=
+            (
+                rect.bottom+
+                8
+            )+
+            "px";
+    }
+}
+
+
+/* =========================================================
+   SATELLITE MAP INITIALIZATION
+========================================================= */
+
+function initializeSatelliteMap(){
+
+    if(
+        typeof map==="undefined"||
+        !map
+    ){
+
+        return;
+    }
+
+    if(
+        satelliteControl
+    ){
+
+        return;
+    }
+
+    satelliteLayer=
+        L.tileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            {
+
+                maxZoom:19,
+
+                attribution:
+                    "Tiles © Esri"
+            }
+        );
+
+    satelliteLabelsLayer=
+        L.tileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+            {
+
+                maxZoom:19,
+
+                opacity:.9,
+
+                attribution:
+                    "Labels © Esri"
+            }
+        );
+
+
+    satelliteControl=
+        document.createElement(
+            "button"
+        );
+
+    satelliteControl.id=
+        "satelliteMapControl";
+
+    satelliteControl.type=
+        "button";
+
+    satelliteControl.innerHTML=
+        "🛰️";
+
+    satelliteControl.title=
+        "Satellite view";
+
+    satelliteControl.setAttribute(
+        "aria-label",
+        "Toggle satellite view"
+    );
+
+    satelliteControl.style.cssText=`
+
+        position:fixed;
+
+        top:85px;
+
+        right:14px;
+
+        z-index:4500;
+
+        width:42px;
+
+        height:42px;
+
+        border:
+            1px solid
+            rgba(59,130,246,.55);
+
+        border-radius:12px;
+
+        background:
+            rgba(5,15,30,.94);
+
+        color:#fff;
+
+        font-size:20px;
+
+        cursor:pointer;
+
+        box-shadow:
+            0 5px 18px
+            rgba(0,0,0,.35);
+
+        backdrop-filter:
+            blur(8px);
+
+        -webkit-backdrop-filter:
+            blur(8px);
+    `;
+
+
+    satelliteControl.addEventListener(
+        "click",
+        function(event){
+
+            event.preventDefault();
+
+            event.stopPropagation();
+
+            toggleSatelliteMap();
+        }
+    );
+
+
+    document.body.appendChild(
+        satelliteControl
+    );
+
+
+    setTimeout(
+        updateSatelliteControlPosition,
+        300
+    );
+
+    window.addEventListener(
+        "resize",
+        updateSatelliteControlPosition
+    );
+}
+
+
+/* =========================================================
+   TOGGLE SATELLITE
+========================================================= */
+
+function toggleSatelliteMap(){
+
+    if(
+        typeof map==="undefined"||
+        !map||
+        !satelliteLayer
+    ){
+
+        return;
+    }
+
+    if(
+        !satelliteModeActive
+    ){
+
+        satelliteLayer.addTo(
+            map
+        );
+
+        if(
+            satelliteLabelsLayer
+        ){
+
+            satelliteLabelsLayer.addTo(
+                map
+            );
+        }
+
+        satelliteModeActive=
+            true;
+
+        if(
+            satelliteControl
+        ){
+
+            satelliteControl.innerHTML=
+                "🗺️";
+
+            satelliteControl.title=
+                "Map view";
+        }
+
+    }else{
+
+        if(
+            map.hasLayer(
+                satelliteLabelsLayer
+            )
+        ){
+
+            map.removeLayer(
+                satelliteLabelsLayer
+            );
+        }
+
+        if(
+            map.hasLayer(
+                satelliteLayer
+            )
+        ){
+
+            map.removeLayer(
+                satelliteLayer
+            );
+        }
+
+        satelliteModeActive=
+            false;
+
+        if(
+            satelliteControl
+        ){
+
+            satelliteControl.innerHTML=
+                "🛰️";
+
+            satelliteControl.title=
+                "Satellite view";
+        }
+    }
+
+    map.invalidateSize();
+}
+
+
+/* =========================================================
+   VOICE CONTROL BUTTON
+========================================================= */
+
+function createVoiceNavigationButton(){
+
+    if(
+        document.getElementById(
+            "navigationVoiceBtn"
+        )
+    ){
+
+        return;
+    }
+
+    const button=
+        document.createElement(
+            "button"
+        );
+
+    button.id=
+        "navigationVoiceBtn";
+
+    button.type=
+        "button";
+
+    button.innerHTML=
+        "🔊";
+
+    button.title=
+        "Toggle voice navigation";
+
+    button.style.cssText=`
+
+        position:fixed;
+
+        right:14px;
+
+        bottom:75px;
+
+        width:42px;
+
+        height:42px;
+
+        z-index:4500;
+
+        border:
+            1px solid
+            rgba(59,130,246,.55);
+
+        border-radius:12px;
+
+        background:
+            rgba(5,15,30,.94);
+
+        color:#fff;
+
+        font-size:19px;
+
+        cursor:pointer;
+
+        box-shadow:
+            0 5px 18px
+            rgba(0,0,0,.35);
+
+        backdrop-filter:
+            blur(8px);
+
+        -webkit-backdrop-filter:
+            blur(8px);
+    `;
+
+
+    button.addEventListener(
+        "click",
+        function(event){
+
+            event.preventDefault();
+
+            event.stopPropagation();
+
+            if(
+                "speechSynthesis" in window
+            ){
+
+                if(
+                    window.speechSynthesis
+                        .speaking
+                ){
+
+                    window.speechSynthesis.cancel();
+
+                    button.innerHTML=
+                        "🔇";
+
+                }else{
+
+                    navigationSpeak(
+                        "Voice navigation enabled"
+                    );
+
+                    button.innerHTML=
+                        "🔊";
+                }
+            }
+        }
+    );
+
+
+    document.body.appendChild(
+        button
+    );
+}
+
+
+/* =========================================================
+   NAVIGATION START/STOP BUTTON
+========================================================= */
+
+function createNavigationControl(){
+
+    if(
+        document.getElementById(
+            "navigationControl"
+        )
+    ){
+
+        return;
+    }
+
+    const button=
+        document.createElement(
+            "button"
+        );
+
+    button.id=
+        "navigationControl";
+
+    button.type=
+        "button";
+
+    button.innerHTML=
+        "▶";
+
+    button.title=
+        "Start navigation";
+
+    button.style.cssText=`
+
+        position:fixed;
+
+        right:14px;
+
+        bottom:125px;
+
+        width:42px;
+
+        height:42px;
+
+        z-index:4500;
+
+        border:
+            1px solid
+            rgba(59,130,246,.55);
+
+        border-radius:12px;
+
+        background:
+            rgba(5,15,30,.94);
+
+        color:#fff;
+
+        font-size:17px;
+
+        cursor:pointer;
+
+        box-shadow:
+            0 5px 18px
+            rgba(0,0,0,.35);
+
+        backdrop-filter:
+            blur(8px);
+
+        -webkit-backdrop-filter:
+            blur(8px);
+    `;
+
+
+    button.addEventListener(
+        "click",
+        function(event){
+
+            event.preventDefault();
+
+            event.stopPropagation();
+
+            if(
+                navigationActive
+            ){
+
+                stopNavigation(
+                    false
+                );
+
+                button.innerHTML=
+                    "▶";
+
+                button.title=
+                    "Start navigation";
+
+            }else{
+
+                startSelectedRouteNavigation();
+
+                button.innerHTML=
+                    "■";
+
+                button.title=
+                    "Stop navigation";
+            }
+        }
+    );
+
+
+    document.body.appendChild(
+        button
+    );
+}
+
+
+/* =========================================================
+   NAVIGATION ARRIVAL
+========================================================= */
+
+function navigationArrived(){
+
+    navigationSpeak(
+        "You have arrived at your destination"
+    );
+
+    stopNavigation(
+        true
+    );
+}
+
+
+/* =========================================================
+   NAVIGATION GPS ERROR HANDLER
+========================================================= */
+
+function handleNavigationGPSError(
+    error
+){
+
+    if(!error){
+
+        return;
+    }
+
+    console.warn(
+        "Navigation GPS error:",
+        error
+    );
+
+    if(
+        error.code===1
+    ){
+
+        console.warn(
+            "Location permission denied."
+        );
+
+    }else if(
+        error.code===2
+    ){
+
+        console.warn(
+            "Position unavailable."
+        );
+
+    }else if(
+        error.code===3
+    ){
+
+        console.warn(
+            "GPS request timed out."
+        );
+    }
+}
+
+
+/* =========================================================
+   SAFE GPS WATCH
+========================================================= */
+
+function startNavigationGPS(){
+
+    if(
+        !navigator.geolocation
+    ){
+
+        alert(
+            "Geolocation is not supported."
+        );
+
+        return;
+    }
+
+    if(
+        navigationWatchId!==null
+    ){
+
+        navigator.geolocation.clearWatch(
+            navigationWatchId
+        );
+    }
+
+    navigationWatchId=
+        navigator.geolocation.watchPosition(
+
+            updateNavigationPosition,
+
+            handleNavigationGPSError,
+
+            {
+                enableHighAccuracy:true,
+
+                maximumAge:2000,
+
+                timeout:10000
+            }
+        );
+}
+
+
+/* =========================================================
+   NAVIGATION STATE UPDATE
+========================================================= */
+
+function updateNavigationControls(){
+
+    const navigationButton=
+        document.getElementById(
+            "navigationControl"
+        );
+
+    if(
+        !navigationButton
+    ){
+
+        return;
+    }
+
+    if(
+        navigationActive
+    ){
+
+        navigationButton.innerHTML=
+            "■";
+
+        navigationButton.title=
+            "Stop navigation";
+
+    }else{
+
+        navigationButton.innerHTML=
+            "▶";
+
+        navigationButton.title=
+            "Start navigation";
+    }
+}
+
+
+/* =========================================================
+   PATCH NAVIGATION START
+========================================================= */
+
+const navigationStartOriginal=
+    startNavigation;
+
+
+/* =========================================================
+   PATCH NAVIGATION STOP
+========================================================= */
+
+const navigationStopOriginal=
+    stopNavigation;
+
+
+/* =========================================================
+   ROUTING INITIALIZATION
+========================================================= */
+
+function initializeRouting(){
+
+    injectRouteCardStyles();
+
+    initializeRecenterButton();
+
+    initializeSatelliteMap();
+
+    createVoiceNavigationButton();
+
+    createNavigationControl();
+
+    setupRouteSummaryControls();
+
+    updateSatelliteControlPosition();
+
+    setTimeout(
+        function(){
+
+            setupLayersRecenterPosition();
+
+            updateSatelliteControlPosition();
+
+        },
+        500
+    );
+}
 /* =========================================================
    MODAL CLOSE
 ========================================================= */
@@ -3152,8 +5331,10 @@ function setupMobileMapRotation(){
 
 
     /*
-       Wrapper rotates the map while Leaflet
-       remains responsible for pan and pinch zoom.
+       Existing Leaflet map rotation.
+
+       One-finger movement and normal Leaflet
+       pinch zoom remain enabled.
     */
 
     mapRotationWrapper=
@@ -3199,11 +5380,9 @@ function setupMobileMapRotation(){
     );
 
 
-    /*
-       Two-finger rotation.
-       Leaflet's normal two-finger pinch zoom
-       is left enabled.
-    */
+    /* =====================================================
+       TWO-FINGER ROTATION
+    ===================================================== */
 
     mapContainer.addEventListener(
         "touchstart",
@@ -3316,8 +5495,7 @@ function setupMobileMapRotation(){
 
 
     /* =====================================================
-       N BUTTON
-       DIRECTLY BELOW RE-CENTER
+       NORTH BUTTON
     ===================================================== */
 
     if(
@@ -3398,6 +5576,7 @@ function setupMobileMapRotation(){
             function(event){
 
                 event.preventDefault();
+
                 event.stopPropagation();
 
                 mapRotationAngle=0;
@@ -3470,6 +5649,61 @@ function setupMobileMapRotation(){
 injectRouteSummaryStyles();
 
 
+function initializeRoutingFeatures(){
+
+    /*
+       Existing map rotation
+    */
+
+    setupMobileMapRotation();
+
+
+    /*
+       Satellite map
+    */
+
+    initializeSatelliteMap();
+
+
+    /*
+       Voice navigation button
+    */
+
+    createVoiceNavigationButton();
+
+
+    /*
+       Navigation control
+    */
+
+    createNavigationControl();
+
+
+    /*
+       Route summary controls
+    */
+
+    setupRouteSummaryControls();
+
+
+    /*
+       Position controls after Leaflet
+       controls have been rendered.
+    */
+
+    setTimeout(
+        function(){
+
+            setupLayersRecenterPosition();
+
+            updateSatelliteControlPosition();
+
+        },
+        500
+    );
+}
+
+
 if(
     document.readyState===
     "loading"
@@ -3477,13 +5711,39 @@ if(
 
     document.addEventListener(
         "DOMContentLoaded",
-        function(){
-
-            setupMobileMapRotation();
-        }
+        initializeRoutingFeatures
     );
 
 }else{
 
-    setupMobileMapRotation();
+    initializeRoutingFeatures();
 }
+
+
+/* =========================================================
+   GLOBAL FUNCTIONS
+========================================================= */
+
+window.startNavigation=
+    startNavigation;
+
+window.stopNavigation=
+    stopNavigation;
+
+window.recenterMap=
+    recenterMap;
+
+window.toggleSatelliteMap=
+    toggleSatelliteMap;
+
+window.findRoute=
+    findRoute;
+
+window.clearRoute=
+    clearRoute;
+
+window.selectRoute=
+    selectRoute;
+
+window.useCurrentLocation=
+    useCurrentLocation;
