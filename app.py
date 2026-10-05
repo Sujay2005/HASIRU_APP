@@ -19,6 +19,7 @@ from services.routing import (
 from services.estimate import estimate_aqi
 
 import json
+import time
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -26,6 +27,17 @@ from datetime import datetime, timezone
 
 
 app = Flask(__name__)
+
+
+# ============================================================
+# GEOCODING CACHE
+# ============================================================
+
+geocode_cache = {}
+
+last_geocode_time = 0
+
+GEOCODE_DELAY = 1.2
 
 
 # ============================================================
@@ -47,35 +59,77 @@ def home():
 @app.route("/geocode")
 def geocode():
 
+    global last_geocode_time
+
     query = request.args.get(
         "q",
         ""
     ).strip()
 
-    if not query:
+    # --------------------------------------------------------
+    # Ignore very short searches
+    # --------------------------------------------------------
+
+    if len(query) < 3:
 
         return jsonify([])
 
     # --------------------------------------------------------
-    # OPEN-METEO GEOCODING
+    # CACHE
+    # --------------------------------------------------------
+
+    cache_key = query.lower()
+
+    if cache_key in geocode_cache:
+
+        print(
+            "Geocode cache hit:",
+            query
+        )
+
+        return jsonify(
+            geocode_cache[cache_key]
+        )
+
+    # --------------------------------------------------------
+    # RATE LIMIT
+    # --------------------------------------------------------
+
+    elapsed = (
+        time.time()
+        - last_geocode_time
+    )
+
+    if elapsed < GEOCODE_DELAY:
+
+        time.sleep(
+            GEOCODE_DELAY - elapsed
+        )
+
+    # --------------------------------------------------------
+    # NOMINATIM
     # --------------------------------------------------------
 
     try:
 
         params = urlencode({
 
-            "name": query,
+            "format":
+                "json",
 
-            "count": 5,
+            "q":
+                query,
 
-            "language": "en",
+            "limit":
+                5,
 
-            "format": "json"
+            "addressdetails":
+                1
 
         })
 
         url = (
-            "https://geocoding-api.open-meteo.com/v1/search?"
+            "https://nominatim.openstreetmap.org/search?"
             + params
         )
 
@@ -86,18 +140,24 @@ def geocode():
             headers={
 
                 "User-Agent":
-                    "HASIRU-AQI-Navigator/1.0",
+                    "HASIRU-AQI-Navigator/1.0 "
+                    "(Bengaluru AQI Navigator)",
 
                 "Accept":
-                    "application/json"
+                    "application/json",
+
+                "Accept-Language":
+                    "en"
 
             }
 
         )
 
+        last_geocode_time = time.time()
+
         with urlopen(
             req,
-            timeout=10
+            timeout=15
         ) as response:
 
             data = json.loads(
@@ -108,107 +168,41 @@ def geocode():
 
             )
 
-        results = []
+        # ----------------------------------------------------
+        # CACHE SUCCESSFUL RESULT
+        # ----------------------------------------------------
 
-        for place in data.get(
-            "results",
-            []
+        if isinstance(
+            data,
+            list
         ):
 
-            latitude = place.get(
-                "latitude"
-            )
+            geocode_cache[
+                cache_key
+            ] = data
 
-            longitude = place.get(
-                "longitude"
-            )
-
-            if (
-                latitude is None
-                or longitude is None
-            ):
-
-                continue
-
-            name = place.get(
-                "name",
-                ""
-            )
-
-            admin1 = place.get(
-                "admin1",
-                ""
-            )
-
-            admin2 = place.get(
-                "admin2",
-                ""
-            )
-
-            country = place.get(
-                "country",
-                ""
-            )
-
-            parts = []
-
-            for value in [
-
-                name,
-
-                admin2,
-
-                admin1,
-
-                country
-
-            ]:
-
-                if (
-
-                    value
-                    and str(value)
-                    not in parts
-
-                ):
-
-                    parts.append(
-                        str(value)
-                    )
-
-            display_name = ", ".join(
-                parts
-            )
-
-            results.append({
-
-                "lat":
-                    str(latitude),
-
-                "lon":
-                    str(longitude),
-
-                "display_name":
-                    display_name
-
-            })
+        print(
+            "Geocoding successful:",
+            query,
+            "results:",
+            len(data)
+        )
 
         return jsonify(
-            results
+            data
         )
 
     except Exception as e:
 
         print(
-            "Open-Meteo geocoding failed:",
+            "Geocoding error:",
+            query,
             e
         )
 
         return jsonify({
-
             "error":
-                "Geocoding service unavailable"
-
+                "Geocoding failed"
         }), 502
 
 
