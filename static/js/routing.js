@@ -60,6 +60,7 @@
     let navigationFollowMode=false;
     let navigationFullRouteCoords=null;
     let navigationTrimIndex=0;
+    let navigationTrimProgress=0;
 
     const NAVIGATION_OFF_ROUTE_DISTANCE=50;
     const NAVIGATION_DESTINATION_DISTANCE=30;
@@ -288,6 +289,7 @@
             coords.slice();
 
         navigationTrimIndex=0;
+        navigationTrimProgress=0;
 
         navigationRouteCoords=
             coords.slice();
@@ -314,7 +316,7 @@
 
 
     /* =========================================================
-       REMOVE TRAVELLED ROUTE - INSTANT FORWARD TRIM
+       REMOVE TRAVELLED ROUTE - VERIFIED INSTANT FORWARD TRIM
     ========================================================= */
 
     function trimNavigationRoute(
@@ -333,13 +335,13 @@
         }
 
         /*
-           Find the nearest point ON the remaining route, not
-           merely the nearest route vertex.
+           Find the nearest point ON the remaining route.
 
-           This is important because GPS coordinates almost
-           never land exactly on an OSRM route vertex.
-           The visible swept portion is therefore removed
-           immediately at the next GPS callback.
+           The important part here is navigationTrimProgress:
+           it stores segment + fractional progress, so the
+           swept path can NEVER move backwards because of GPS
+           jitter, even when two GPS fixes fall on the same
+           route segment.
         */
         let nearestSegment=
             navigationTrimIndex;
@@ -455,21 +457,59 @@
         }
 
         /*
-           Never move backwards along the route.
+           Convert segment + fraction into one continuous
+           route-progress value.
+
+           Example:
+             segment 10 at 0.80 = 10.80
+             segment 10 at 0.20 = 10.20
+
+           If GPS briefly jumps backwards, the stored progress
+           wins and the visible route stays trimmed.
         */
+        let candidateProgress=
+            nearestSegment+
+            nearestT;
+
         if(
-            nearestSegment<
-            navigationTrimIndex
+            candidateProgress<
+            navigationTrimProgress
         ){
 
-            nearestSegment=
-                navigationTrimIndex;
-
-            nearestT=0;
+            candidateProgress=
+                navigationTrimProgress;
         }
 
+        /*
+           Convert the monotonic progress back into a segment
+           and fractional position.
+        */
+        navigationTrimProgress=
+            candidateProgress;
+
         navigationTrimIndex=
-            nearestSegment;
+            Math.min(
+                Math.floor(
+                    navigationTrimProgress
+                ),
+                navigationFullRouteCoords.length-2
+            );
+
+        nearestSegment=
+            navigationTrimIndex;
+
+        nearestT=
+            navigationTrimProgress-
+            navigationTrimIndex;
+
+        nearestT=
+            Math.max(
+                0,
+                Math.min(
+                    1,
+                    nearestT
+                )
+            );
 
         const startPoint=
             navigationFullRouteCoords[
@@ -485,10 +525,8 @@
             ];
 
         /*
-           Use the exact projected point on the OSRM line.
-           This makes the old/swept portion disappear
-           immediately instead of waiting for the vehicle to
-           reach the next route vertex.
+           Start the visible route exactly at the projected
+           position on the OSRM line.
         */
         const trimmedStart=[
             startPoint[0]+
@@ -1805,9 +1843,11 @@
             color:#fff;
             font-size:30px;
             font-weight:700;
-            display:flex;
-            align-items:center;
-            justify-content:center;
+            display:flex !important;
+            align-items:center !important;
+            justify-content:center !important;
+            pointer-events:auto !important;
+            touch-action:manipulation !important;
             cursor:pointer;
             box-shadow:
                 0 4px 14px rgba(0,0,0,.45),
@@ -4248,9 +4288,11 @@
             background:rgba(5,15,30,.94);
             color:#fff;
             font-size:20px;
-            display:flex;
-            align-items:center;
-            justify-content:center;
+            display:flex !important;
+            align-items:center !important;
+            justify-content:center !important;
+            pointer-events:auto !important;
+            touch-action:manipulation !important;
             cursor:pointer;
             box-shadow:0 5px 18px rgba(0,0,0,.35);
             backdrop-filter:blur(8px);
@@ -4663,6 +4705,8 @@
                 box-shadow:0 5px 18px rgba(0,0,0,.35);
                 backdrop-filter:blur(8px);
                 -webkit-backdrop-filter:blur(8px);
+                pointer-events:auto !important;
+                touch-action:manipulation !important;
                 cursor:pointer;
             `;
 
