@@ -1491,6 +1491,101 @@
 
 
     /* =========================================================
+       NAVIGATION ROUTE LAYER VISIBILITY
+    ========================================================= */
+
+    function hideStaticRouteLayersForNavigation(){
+
+        /*
+           There are TWO different route drawings:
+
+           1. routePolylines / alternateRoutesLayer
+              = the original full route shown after
+                "Find clearest route".
+
+           2. routeSegmentsLayer
+              = the detailed AQI-colored route segments.
+
+           3. navigationRoutePolyline
+              = the LIVE navigation route that is trimmed.
+
+           During navigation, ONLY #3 must remain visible.
+        */
+
+        if(
+            routePolylines&&
+            routePolylines.length
+        ){
+
+            routePolylines.forEach(
+                function(polyline){
+
+                    if(
+                        polyline&&
+                        map.hasLayer(polyline)
+                    ){
+
+                        map.removeLayer(
+                            polyline
+                        );
+                    }
+                }
+            );
+        }
+
+        if(
+            routeSegmentsLayer
+        ){
+
+            routeSegmentsLayer.clearLayers();
+
+            if(
+                map.hasLayer(
+                    routeSegmentsLayer
+                )
+            ){
+
+                map.removeLayer(
+                    routeSegmentsLayer
+                );
+            }
+        }
+
+        if(
+            alternateRoutesLayer&&
+            map.hasLayer(
+                alternateRoutesLayer
+            )
+        ){
+
+            map.removeLayer(
+                alternateRoutesLayer
+            );
+        }
+    }
+
+
+    function restoreStaticRouteLayersAfterNavigation(){
+
+        if(
+            routeSegmentsLayer&&
+            !map.hasLayer(routeSegmentsLayer)
+        ){
+
+            routeSegmentsLayer.addTo(map);
+        }
+
+        if(
+            alternateRoutesLayer&&
+            !map.hasLayer(alternateRoutesLayer)
+        ){
+
+            alternateRoutesLayer.addTo(map);
+        }
+    }
+
+
+    /* =========================================================
        START NAVIGATION
     ========================================================= */
 
@@ -1509,6 +1604,13 @@
         navigationActive=true;
         navigationFollowMode=true;
         lastNavigationRerouteTime=0;
+
+        /*
+           Hide the original full route while navigating.
+           Otherwise its AQI segment polylines stay visible
+           underneath the trimmed navigation route.
+        */
+        hideStaticRouteLayersForNavigation();
 
         if(sourceMarker){
 
@@ -1625,6 +1727,12 @@
 
         navigationRouteCoords=null;
         lastKnownNavigationPosition=null;
+
+        /*
+           Navigation route is now removed, so restore the
+           original AQI/alternative route layers.
+        */
+        restoreStaticRouteLayersAfterNavigation();
 
         resetNavigationVoice();
 
@@ -2118,15 +2226,24 @@
 
                 if(i===index){
 
-                    if(
-                        !alternateRoutesLayer.hasLayer(
-                            polyline
-                        )
-                    ){
+                    /*
+                       During live navigation the original full
+                       route must stay hidden. The trimmed
+                       navigationRoutePolyline is the only route
+                       that should be visible.
+                    */
+                    if(!navigationActive){
 
-                        polyline.addTo(
-                            alternateRoutesLayer
-                        );
+                        if(
+                            !alternateRoutesLayer.hasLayer(
+                                polyline
+                            )
+                        ){
+
+                            polyline.addTo(
+                                alternateRoutesLayer
+                            );
+                        }
                     }
 
                     polyline.setStyle({
@@ -2268,6 +2385,11 @@
 
             alternateRoutesLayer.clearLayers();
             routeSegmentsLayer.clearLayers();
+
+            if(navigationActive){
+
+                hideStaticRouteLayersForNavigation();
+            }
 
             const routeInfo=
                 document.getElementById(
@@ -3486,6 +3608,17 @@
             if(
                 index!==selectedRoute
             ){
+
+                return;
+            }
+
+            /*
+               Navigation uses its own trimmed polyline.
+               Do NOT recreate the original full AQI route
+               after navigation has started, because that would
+               create a second visible layer underneath it.
+            */
+            if(navigationActive){
 
                 return;
             }
