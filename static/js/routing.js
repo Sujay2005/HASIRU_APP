@@ -314,7 +314,7 @@
 
 
     /* =========================================================
-       REMOVE TRAVELLED ROUTE - FORWARD ONLY
+       REMOVE TRAVELLED ROUTE - INSTANT FORWARD TRIM
     ========================================================= */
 
     function trimNavigationRoute(
@@ -332,29 +332,110 @@
             return;
         }
 
+        /*
+           Find the nearest point ON the remaining route, not
+           merely the nearest route vertex.
+
+           This is important because GPS coordinates almost
+           never land exactly on an OSRM route vertex.
+           The visible swept portion is therefore removed
+           immediately at the next GPS callback.
+        */
         let nearestSegment=
             navigationTrimIndex;
 
         let nearestDistance=
             Infinity;
 
-        /*
-           Search only from the current forward position.
-           This prevents GPS jitter from finding an older
-           part of the route when the road comes close to
-           itself.
-        */
+        let nearestT=0;
+
         for(
             let i=navigationTrimIndex;
             i<navigationFullRouteCoords.length-1;
             i++
         ){
 
+            const a=
+                navigationFullRouteCoords[i];
+
+            const b=
+                navigationFullRouteCoords[i+1];
+
+            const latScale=111320;
+
+            const lngScale=
+                111320*
+                Math.cos(
+                    currentPosition.lat*Math.PI/180
+                );
+
+            const px=
+                currentPosition.lng*
+                lngScale;
+
+            const py=
+                currentPosition.lat*
+                latScale;
+
+            const ax=
+                a[1]*
+                lngScale;
+
+            const ay=
+                a[0]*
+                latScale;
+
+            const bx=
+                b[1]*
+                lngScale;
+
+            const by=
+                b[0]*
+                latScale;
+
+            const dx=
+                bx-ax;
+
+            const dy=
+                by-ay;
+
+            let t=0;
+
+            if(
+                dx!==0||
+                dy!==0
+            ){
+
+                t=
+                    (
+                        (px-ax)*dx+
+                        (py-ay)*dy
+                    )/
+                    (
+                        dx*dx+
+                        dy*dy
+                    );
+
+                t=
+                    Math.max(
+                        0,
+                        Math.min(
+                            1,
+                            t
+                        )
+                    );
+            }
+
+            const projectedX=
+                ax+t*dx;
+
+            const projectedY=
+                ay+t*dy;
+
             const distance=
-                distancePointToSegmentMeters(
-                    currentPosition,
-                    navigationFullRouteCoords[i],
-                    navigationFullRouteCoords[i+1]
+                Math.hypot(
+                    px-projectedX,
+                    py-projectedY
                 );
 
             if(
@@ -367,9 +448,15 @@
 
                 nearestSegment=
                     i;
+
+                nearestT=
+                    t;
             }
         }
 
+        /*
+           Never move backwards along the route.
+        */
         if(
             nearestSegment<
             navigationTrimIndex
@@ -377,20 +464,48 @@
 
             nearestSegment=
                 navigationTrimIndex;
+
+            nearestT=0;
         }
 
         navigationTrimIndex=
             nearestSegment;
 
+        const startPoint=
+            navigationFullRouteCoords[
+                nearestSegment
+            ];
+
+        const endPoint=
+            navigationFullRouteCoords[
+                Math.min(
+                    nearestSegment+1,
+                    navigationFullRouteCoords.length-1
+                )
+            ];
+
+        /*
+           Use the exact projected point on the OSRM line.
+           This makes the old/swept portion disappear
+           immediately instead of waiting for the vehicle to
+           reach the next route vertex.
+        */
+        const trimmedStart=[
+            startPoint[0]+
+            (endPoint[0]-startPoint[0])*
+            nearestT,
+
+            startPoint[1]+
+            (endPoint[1]-startPoint[1])*
+            nearestT
+        ];
+
         const remainingRoute=[
-            [
-                currentPosition.lat,
-                currentPosition.lng
-            ]
+            trimmedStart
         ];
 
         for(
-            let i=navigationTrimIndex+1;
+            let i=nearestSegment+1;
             i<navigationFullRouteCoords.length;
             i++
         ){
