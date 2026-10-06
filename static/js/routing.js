@@ -49,6 +49,12 @@
     let navigationRoutePolyline=null;
     let navigationRouteCoords=null;
     let lastNavigationRerouteTime=0;
+
+    /*
+       Prevent multiple GPS updates from starting
+       simultaneous reroute requests.
+    */
+    let navigationRerouteInProgress=false;
     let lastKnownNavigationPosition=null;
 
     let navigationFollowMode=false;
@@ -1073,7 +1079,8 @@
 
         if(
             !navigationActive||
-            !destination
+            !destination||
+            navigationRerouteInProgress
         ){
 
             return;
@@ -1090,6 +1097,7 @@
             return;
         }
 
+        navigationRerouteInProgress=true;
         lastNavigationRerouteTime=now;
 
         try{
@@ -1118,10 +1126,11 @@
                 return;
             }
 
+            const newRoute=
+                data.routes[0];
+
             const coords=
-                data.routes[0]
-                    .geometry
-                    .coordinates
+                newRoute.geometry.coordinates
                     .map(
                         function(c){
 
@@ -1132,6 +1141,18 @@
                         }
                     );
 
+            if(
+                coords.length<2
+            ){
+
+                return;
+            }
+
+            /*
+               Replace the old route with the newly calculated
+               route from the PRESENT GPS POSITION to the same
+               destination.
+            */
             drawNavigationRoute(
                 coords
             );
@@ -1141,12 +1162,38 @@
                 lng:position.lng
             };
 
+            lastKnownNavigationPosition={
+                lat:position.lat,
+                lng:position.lng
+            };
+
+            /*
+               Rebuild turn-by-turn voice instructions for
+               the newly calculated route.
+            */
+            buildNavigationVoiceSteps(
+                newRoute
+            );
+
+            /*
+               The current GPS position is already the first
+               point of the new route, so don't trim it again
+               during this same GPS update.
+            */
+            createNavigationMarker(
+                position
+            );
+
         }catch(error){
 
             console.error(
                 "Navigation reroute failed:",
                 error
             );
+
+        }finally{
+
+            navigationRerouteInProgress=false;
         }
     }
 
@@ -1203,9 +1250,33 @@
             );
         }
 
-        trimNavigationRoute(
-            currentPosition
-        );
+        /*
+           IMPORTANT:
+
+           Check whether the vehicle has left the route
+           BEFORE trimming the travelled route.
+
+           Previously the route was trimmed first. That could
+           move the route's first point to the current GPS
+           position and make the off-route distance appear
+           artificially small.
+
+           This order is what allows Google-Maps-style
+           off-route detection to work reliably.
+        */
+        let routeDistance=null;
+
+        if(
+            navigationRouteCoords&&
+            navigationRouteCoords.length>1
+        ){
+
+            routeDistance=
+                distanceToRouteMeters(
+                    currentPosition,
+                    navigationRouteCoords
+                );
+        }
 
         const distanceToDestination=
             getDistanceMeters(
@@ -1225,27 +1296,44 @@
             return;
         }
 
+        /*
+           If the driver is more than the configured
+           off-route distance from the remaining route,
+           calculate a completely new route from the
+           CURRENT GPS POSITION to the SAME destination.
+        */
         if(
-            navigationRouteCoords&&
-            navigationRouteCoords.length>1
+            routeDistance!==null&&
+            routeDistance>
+            NAVIGATION_OFF_ROUTE_DISTANCE
         ){
 
-            const routeDistance=
-                distanceToRouteMeters(
-                    currentPosition,
-                    navigationRouteCoords
-                );
+            rerouteNavigation(
+                currentPosition
+            );
 
-            if(
-                routeDistance>
-                NAVIGATION_OFF_ROUTE_DISTANCE
-            ){
-
-                rerouteNavigation(
-                    currentPosition
-                );
-            }
+            /*
+               Do not trim the old route while a reroute is
+               being requested. The new route will replace it.
+            */
+            return;
         }
+
+        /*
+           Still on route:
+           remove the portion already travelled.
+        */
+        trimNavigationRoute(
+            currentPosition
+        );
+
+        /*
+           Continue normal turn-by-turn voice guidance.
+           This remains unchanged for on-route navigation.
+        */
+        updateNavigationVoice(
+            currentPosition
+        );
     }
 
 
