@@ -18,6 +18,20 @@
     let destinationMarker=null;
 
     let routeSegmentsLayer=L.layerGroup().addTo(map);
+    let routeAQIPane=null;
+
+    /* AQI route segments must stay above the normal route line. */
+    if(
+        typeof map!=="undefined"&&
+        map&&
+        !map.getPane("routeAQI")
+    ){
+
+        routeAQIPane=
+            map.createPane("routeAQI");
+
+        routeAQIPane.style.zIndex=450;
+    }
     let alternateRoutesLayer=L.layerGroup().addTo(map);
 
     let routePolylines=[];
@@ -39,11 +53,7 @@
 
     let navigationFollowMode=false;
     let navigationFullRouteCoords=null;
-
-    /* AQI-colored navigation route state */
-    let navigationAQISegments=[];
     let navigationTrimIndex=0;
-    let navigationAQILoadToken=0;
 
     const NAVIGATION_OFF_ROUTE_DISTANCE=50;
     const NAVIGATION_DESTINATION_DISTANCE=30;
@@ -234,6 +244,28 @@
        DRAW LIVE NAVIGATION ROUTE
     ========================================================= */
 
+    function getSelectedRouteAQIColor(){
+
+        if(
+            routeResults&&
+            routeResults[selectedRoute]
+        ){
+
+            const aqi=
+                Number(
+                    routeResults[selectedRoute].averageAQI
+                );
+
+            if(Number.isFinite(aqi)){
+
+                return getAQIColor(aqi);
+            }
+        }
+
+        return "#1976e8";
+    }
+
+
     function drawNavigationRoute(
         coords
     ){
@@ -249,224 +281,34 @@
         navigationFullRouteCoords=
             coords.slice();
 
-        navigationRouteCoords=
-            coords.slice();
-
         navigationTrimIndex=0;
 
-        navigationAQILoadToken++;
-
-        navigationAQISegments=[];
+        navigationRouteCoords=
+            coords.slice();
 
         if(navigationRoutePolyline){
 
             map.removeLayer(
                 navigationRoutePolyline
             );
-
-            navigationRoutePolyline=null;
         }
-
-        /*
-           Temporary fallback route.
-           It disappears automatically when the AQI segment
-           data is loaded successfully.
-        */
 
         navigationRoutePolyline=
             L.polyline(
                 coords,
                 {
-                    color:"#1976e8",
-                    weight:7,
-                    opacity:.45
+                    color:
+                        getSelectedRouteAQIColor(),
+                    weight:8,
+                    opacity:.95,
+                    pane:"routeAQI"
                 }
             ).addTo(map);
-
-        loadNavigationAQISegments(
-            coords
-        );
     }
 
 
     /* =========================================================
-       LOAD AQI-COLORED NAVIGATION ROUTE
-    ========================================================= */
-
-    async function loadNavigationAQISegments(
-        routeCoords
-    ){
-
-        if(
-            !routeCoords||
-            routeCoords.length<2
-        ){
-
-            return;
-        }
-
-        const token=
-            navigationAQILoadToken;
-
-        try{
-
-            const response=
-                await fetch(
-                    "/route_segments",
-                    {
-                        method:"POST",
-                        headers:{
-                            "Content-Type":
-                                "application/json"
-                        },
-                        body:
-                            JSON.stringify({
-                                route:
-                                    routeCoords
-                            })
-                    }
-                );
-
-            if(
-                !response.ok||
-                token!==navigationAQILoadToken||
-                !navigationActive
-            ){
-
-                return;
-            }
-
-            const segmentData=
-                await response.json();
-
-            if(
-                !Array.isArray(segmentData)||
-                segmentData.length<2
-            ){
-
-                return;
-            }
-
-            if(token!==navigationAQILoadToken){
-
-                return;
-            }
-
-            /*
-               Remove the previous full-route AQI segments.
-               Navigation will draw its own trimmed segments.
-            */
-
-            routeSegmentsLayer.clearLayers();
-            navigationAQISegments=[];
-
-            for(
-                let i=0;
-                i<segmentData.length-1;
-                i++
-            ){
-
-                const p1=
-                    segmentData[i];
-
-                const p2=
-                    segmentData[i+1];
-
-                const start=[
-                    p1.lat,
-                    p1.lon
-                ];
-
-                const end=[
-                    p2.lat,
-                    p2.lon
-                ];
-
-                const aqi=
-                    Number(p1.aqi);
-
-                const segment=
-                    L.polyline(
-                        [
-                            start,
-                            end
-                        ],
-                        {
-                            color:
-                                getAQIColor(aqi),
-                            weight:8,
-                            opacity:1,
-                            lineCap:"round",
-                            lineJoin:"round"
-                        }
-                    );
-
-                segment.bindPopup(
-                    "<b>Route AQI</b><br>"+
-                    "AQI: "+
-                    Math.round(
-                        Number.isFinite(aqi)
-                        ? aqi
-                        : 0
-                    )+
-                    "<br>"+
-                    getAQICategory(aqi)
-                );
-
-                routeSegmentsLayer.addLayer(
-                    segment
-                );
-
-                navigationAQISegments.push({
-                    polyline:segment,
-                    start:start,
-                    end:end,
-                    aqi:aqi
-                });
-            }
-
-            if(navigationRoutePolyline){
-
-                map.removeLayer(
-                    navigationRoutePolyline
-                );
-
-                navigationRoutePolyline=null;
-            }
-
-            /* Make sure AQI segments remain above map layers. */
-
-            navigationAQISegments.forEach(
-                function(item){
-
-                    if(item.polyline&&
-                       item.polyline.bringToFront){
-
-                        item.polyline.bringToFront();
-                    }
-                }
-            );
-
-            trimNavigationRoute(
-                lastKnownNavigationPosition||
-                {
-                    lat:routeCoords[0][0],
-                    lng:routeCoords[0][1]
-                }
-            );
-
-        }catch(error){
-
-            console.warn(
-                "Navigation AQI route unavailable:",
-                error
-            );
-        }
-    }
-
-
-    /* =========================================================
-       REMOVE TRAVELLED ROUTE
+       REMOVE TRAVELLED ROUTE - FORWARD ONLY
     ========================================================= */
 
     function trimNavigationRoute(
@@ -477,140 +319,12 @@
             !navigationActive||
             !navigationFullRouteCoords||
             navigationFullRouteCoords.length<2||
+            !navigationRoutePolyline||
             !currentPosition
         ){
 
             return;
         }
-
-        /*
-           When AQI segments are available, trim those segments
-           directly. This keeps the route color based on AQI while
-           removing the travelled part immediately.
-        */
-
-        if(
-            navigationAQISegments&&
-            navigationAQISegments.length>0
-        ){
-
-            let nearestSegment=
-                navigationTrimIndex;
-
-            let nearestDistance=
-                Infinity;
-
-            for(
-                let i=navigationTrimIndex;
-                i<navigationAQISegments.length;
-                i++
-            ){
-
-                const item=
-                    navigationAQISegments[i];
-
-                const distance=
-                    distancePointToSegmentMeters(
-                        currentPosition,
-                        item.start,
-                        item.end
-                    );
-
-                if(
-                    distance<nearestDistance
-                ){
-
-                    nearestDistance=
-                        distance;
-
-                    nearestSegment=
-                        i;
-                }
-            }
-
-            if(
-                nearestSegment<
-                navigationTrimIndex
-            ){
-
-                nearestSegment=
-                    navigationTrimIndex;
-            }
-
-            navigationTrimIndex=
-                nearestSegment;
-
-            navigationAQISegments.forEach(
-                function(item,index){
-
-                    if(index<nearestSegment){
-
-                        item.polyline.setLatLngs([]);
-
-                        return;
-                    }
-
-                    if(index===nearestSegment){
-
-                        item.polyline.setLatLngs([
-                            [
-                                currentPosition.lat,
-                                currentPosition.lng
-                            ],
-                            item.end
-                        ]);
-
-                        return;
-                    }
-
-                    item.polyline.setLatLngs([
-                        item.start,
-                        item.end
-                    ]);
-                }
-            );
-
-            /* Keep the logical route used for off-route detection. */
-
-            const remainingRoute=[
-                [
-                    currentPosition.lat,
-                    currentPosition.lng
-                ]
-            ];
-
-            for(
-                let i=navigationTrimIndex+1;
-                i<navigationFullRouteCoords.length;
-                i++
-            ){
-
-                remainingRoute.push(
-                    navigationFullRouteCoords[i]
-                );
-            }
-
-            if(
-                remainingRoute.length<2&&
-                destination
-            ){
-
-                remainingRoute.push([
-                    destination.lat,
-                    destination.lng
-                ]);
-            }
-
-            navigationRouteCoords=
-                remainingRoute;
-
-            return;
-        }
-
-        /*
-           Fallback for the short period before AQI data arrives.
-           Search only forward so GPS cannot resurrect old route.
-        */
 
         let nearestSegment=
             navigationTrimIndex;
@@ -618,6 +332,12 @@
         let nearestDistance=
             Infinity;
 
+        /*
+           Search only from the current forward position.
+           This prevents GPS jitter from finding an older
+           part of the route when the road comes close to
+           itself.
+        */
         for(
             let i=navigationTrimIndex;
             i<navigationFullRouteCoords.length-1;
@@ -632,7 +352,8 @@
                 );
 
             if(
-                distance<nearestDistance
+                distance<
+                nearestDistance
             ){
 
                 nearestDistance=
@@ -643,11 +364,17 @@
             }
         }
 
+        if(
+            nearestSegment<
+            navigationTrimIndex
+        ){
+
+            nearestSegment=
+                navigationTrimIndex;
+        }
+
         navigationTrimIndex=
-            Math.max(
-                navigationTrimIndex,
-                nearestSegment
-            );
+            nearestSegment;
 
         const remainingRoute=[
             [
@@ -681,12 +408,9 @@
         navigationRouteCoords=
             remainingRoute;
 
-        if(navigationRoutePolyline){
-
-            navigationRoutePolyline.setLatLngs(
-                remainingRoute
-            );
-        }
+        navigationRoutePolyline.setLatLngs(
+            remainingRoute
+        );
     }
 
 
@@ -1625,6 +1349,7 @@
         navigationActive=false;
         navigationFollowMode=false;
         navigationFullRouteCoords=null;
+        navigationTrimIndex=0;
 
         if(
             navigationWatchId!==null
@@ -1655,12 +1380,6 @@
             navigationRoutePolyline=null;
         }
 
-        navigationAQILoadToken++;
-        navigationAQISegments=[];
-        navigationTrimIndex=0;
-
-        routeSegmentsLayer.clearLayers();
-
         navigationRouteCoords=null;
         lastKnownNavigationPosition=null;
 
@@ -1669,16 +1388,6 @@
         if(sourceMarker){
 
             sourceMarker.setOpacity(1);
-        }
-
-        if(
-            routeResults[selectedRoute]&&
-            routeResults[selectedRoute].routeCoords
-        ){
-
-            loadRouteSegments(
-                selectedRoute
-            );
         }
 
         if(reachedDestination){
@@ -1848,10 +1557,10 @@
             width:50px;
             height:50px;
             padding:0;
-            border:2px solid rgba(255,255,255,.9);
+            border:2px solid rgba(255,255,255,.95);
             border-radius:50%;
             background:#07182f;
-            color:#ffffff;
+            color:#fff;
             font-size:30px;
             font-weight:700;
             display:flex;
@@ -1863,9 +1572,7 @@
                 0 0 0 2px rgba(25,118,232,.25);
             backdrop-filter:blur(8px);
             -webkit-backdrop-filter:blur(8px);
-            transition:
-                transform .15s ease,
-                background .15s ease;
+            transition:transform .15s ease;
         `;
 
         button.addEventListener(
@@ -1885,9 +1592,7 @@
 
                 event.stopPropagation();
             },
-            {
-                passive:true
-            }
+            {passive:true}
         );
 
         button.addEventListener(
@@ -1912,7 +1617,6 @@
             button
         );
     }
-
 
 
     /* =========================================================
@@ -1986,7 +1690,6 @@
             updateRecenterPosition
         );
     }
-
 
 
     /* =========================================================
@@ -2139,8 +1842,14 @@
                     }
 
                     polyline.setStyle({
-                        weight:6,
-                        opacity:.18
+                        color:
+                            getAQIColor(
+                                Number(
+                                    routeResults[i].averageAQI
+                                )
+                            ),
+                        weight:10,
+                        opacity:1
                     });
 
                 }else{
@@ -2282,11 +1991,11 @@
                 routeInfo.innerHTML="";
             }
 
-            const routeColors=[
-                "blue",
-                "green",
-                "purple"
-            ];
+            /*
+               Do not use fixed route colors.
+               Every route is colored from its AQI after
+               /route_aqi returns the route's AQI values.
+            */
 
             routes.forEach(
                 function(route,index){
@@ -2306,13 +2015,9 @@
                         L.polyline(
                             routeLatLngs,
                             {
-                                color:
-                                    routeColors[
-                                        index%
-                                        routeColors.length
-                                    ],
+                                color:"#9ca3af",
                                 weight:5,
-                                opacity:0.7
+                                opacity:0.72
                             }
                         );
 
@@ -2536,6 +2241,45 @@
                 );
 
 
+            /*
+               IMPORTANT: the route itself must never remain
+               blue/green/purple.
+
+               Use the route's average AQI as the guaranteed
+               base color immediately. Detailed AQI segments
+               are then drawn on top by loadRouteSegments().
+            */
+            routeResults.forEach(
+                function(route,index){
+
+                    if(
+                        !routePolylines[index]
+                    ){
+
+                        return;
+                    }
+
+                    const averageAQI=
+                        Number(
+                            route.averageAQI
+                        );
+
+                    const routeColor=
+                        Number.isFinite(averageAQI)
+                        ?
+                            getAQIColor(averageAQI)
+                        :
+                            "#9ca3af";
+
+                    routePolylines[index].setStyle({
+                        color:routeColor,
+                        weight:5,
+                        opacity:.85
+                    });
+                }
+            );
+
+
             if(
                 routeResults.length>0
             ){
@@ -2589,8 +2333,16 @@
                 routePolylines[
                     recommendedIndex
                 ].setStyle({
-                    weight:6,
-                    opacity:.18
+                    color:
+                        getAQIColor(
+                            Number(
+                                routeResults[
+                                    recommendedIndex
+                                ].averageAQI
+                            )
+                        ),
+                    weight:10,
+                    opacity:1
                 });
 
                 showRouteSummary(
@@ -3378,7 +3130,7 @@
 
 
     /* =========================================================
-       ROUTE SEGMENTS
+       ROUTE SEGMENTS — AQI COLORED ROUTE
     ========================================================= */
 
     async function loadRouteSegments(index){
@@ -3425,6 +3177,10 @@
 
             if(!response.ok){
 
+                /*
+                   The average AQI base color remains visible
+                   if detailed segment data is unavailable.
+                */
                 return;
             }
 
@@ -3448,14 +3204,6 @@
 
             routeSegmentsLayer.clearLayers();
 
-            if(routePolylines[index]){
-
-                routePolylines[index].setStyle({
-                    weight:6,
-                    opacity:.18
-                });
-            }
-
             for(
                 let i=0;
                 i<segmentData.length-1;
@@ -3467,6 +3215,16 @@
 
                 const p2=
                     segmentData[i+1];
+
+                const aqi=
+                    Number(p1.aqi);
+
+                const safeAQI=
+                    Number.isFinite(aqi)
+                    ?
+                        aqi
+                    :
+                        Number(route.averageAQI)||0;
 
                 const segment=
                     L.polyline(
@@ -3483,29 +3241,25 @@
                         {
                             color:
                                 getAQIColor(
-                                    p1.aqi
+                                    safeAQI
                                 ),
-                            weight:8,
-                            opacity:1
+                            weight:9,
+                            opacity:1,
+                            pane:"routeAQI"
                         }
                     );
 
                 segment.bindPopup(
-                    "<b>Segment AQI</b><br>"+
+                    "<b>Route AQI</b><br>"+
                     "AQI: "+
-                    Math.round(
-                        Number(p1.aqi)
-                    )
+                    Math.round(safeAQI)+
+                    "<br>"+
+                    getAQICategory(safeAQI)
                 );
 
                 routeSegmentsLayer.addLayer(
                     segment
                 );
-
-                if(segment.bringToFront){
-
-                    segment.bringToFront();
-                }
             }
 
         }catch(error){
@@ -3849,6 +3603,7 @@
 
         routeResults=[];
         routePolylines=[];
+        navigationTrimIndex=0;
 
         userSelectedRoute=false;
 
